@@ -84,6 +84,9 @@ set(GUI_SOURCE_FILES # C++ files for the GUI application
         app/mainwindow/storagecontroller.h
         app/mainwindow/storagescanner.cpp
         app/mainwindow/storagescanner.h
+        app/mainwindow/synccontrolcontroller.cpp
+        app/mainwindow/synccontrolcontroller.h
+        app/mainwindow/synccontrolstate.h
         app/mainwindow/syncerroractionhandler.cpp
         app/mainwindow/syncerroractionhandler.h
         app/mainwindow/syncerrorexplanationcontroller.cpp
@@ -306,6 +309,7 @@ set(GUI_QML_FILES # .qml files for the app
         ui/dialogs/ManyDeletesDialog.qml
         ui/windows/main/MainToolbar.qml
         ui/windows/main/MainWindowView.qml
+        ui/windows/main/SyncControlMenu.qml
         ui/windows/main/storage/StorageErrorState.qml
         ui/windows/main/storage/StorageUsageCard.qml
         ui/windows/main/storage/StorageView.qml
