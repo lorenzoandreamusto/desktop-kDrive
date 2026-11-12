@@ -133,6 +133,12 @@ bool CommonUtility::fileSystemInfo(const SyncPath &targetPath, std::string &fsTy
         case 0x5346544eu: // NTFS_SB_MAGIC
             fsType = fsType::NTFS;
             break;
+        case 0x58465342u: // XFS_SUPER_MAGIC
+            fsType = fsType::XFS;
+            break;
+        case 0x9123683eu: // BTRFS_SUPER_MAGIC
+            fsType = fsType::BTRFS;
+            break;
         case 0x2011bab0u: // EXFAT_SUPER_MAGIC
             fsType = fsType::EXFAT;
             break;

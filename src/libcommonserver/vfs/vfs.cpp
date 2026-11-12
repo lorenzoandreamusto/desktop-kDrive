@@ -29,6 +29,12 @@
 #include <QOperatingSystemVersion>
 #include <QPluginLoader>
 
+#if defined(KD_LINUX)
+#include <cerrno>
+#include <cstring>
+#include <unistd.h>
+#endif
+
 #define MIN_WINDOWS10_MICROVERSION_FOR_CFAPI 16299 // Windows 10 version 1709
 
 using namespace KDC;
@@ -102,6 +108,8 @@ CommString Vfs::modeToString(KDC::VirtualFileMode virtualFileMode) {
             return Str("wincfapi");
         case KDC::VirtualFileMode::Mac:
             return Str("mac");
+        case KDC::VirtualFileMode::Linux:
+            return Str("linux");
         case KDC::VirtualFileMode::EnumEnd: {
             assert(false && "Invalid enum value in switch statement.");
         }
@@ -118,6 +126,8 @@ KDC::VirtualFileMode Vfs::modeFromString(const QString &str) {
         return KDC::VirtualFileMode::Win;
     } else if (str == "mac") {
         return KDC::VirtualFileMode::Mac;
+    } else if (str == "linux") {
+        return KDC::VirtualFileMode::Linux;
     }
 
     return {};
@@ -262,16 +272,31 @@ ExitInfo VfsOff::startImpl(bool &, bool &, bool &) {
     return ExitCode::Ok;
 }
 
+#if defined(KD_LINUX)
+static bool checkFuseAvailability(QString &error) {
+    static constexpr auto fuseDevicePath = "/dev/fuse";
+    if (access(fuseDevicePath, R_OK | W_OK) == 0) return true;
+
+    const int accessError = errno;
+    error = QStringLiteral("FUSE device is not available or not accessible: %1 (%2)")
+                    .arg(QString::fromLatin1(fuseDevicePath), QString::fromLocal8Bit(std::strerror(accessError)));
+    return false;
+}
+#endif
+
 static QString modeToPluginName(const VirtualFileMode virtualFileMode) {
     if (virtualFileMode == VirtualFileMode::Win) return "win";
     if (virtualFileMode == VirtualFileMode::Mac) return "mac";
+    if (virtualFileMode == VirtualFileMode::Linux) return "linux";
     return {};
 }
 
 bool KDC::isVfsPluginAvailable(const VirtualFileMode virtualFileMode, QString &error) {
     if (virtualFileMode == VirtualFileMode::Off) return true;
 
-#if !defined(KD_LINUX)
+#if defined(KD_LINUX)
+    if (virtualFileMode == VirtualFileMode::Linux && !checkFuseAvailability(error)) return false;
+#else
     if (virtualFileMode == VirtualFileMode::Win) {
         if (CommonUtility::platform() == Platform::WindowsServer) return false; // LiteSync not available on Windows Server
 
@@ -329,6 +354,8 @@ VirtualFileMode KDC::bestAvailableVfsMode() {
         return VirtualFileMode::Win;
     } else if (isVfsPluginAvailable(VirtualFileMode::Mac, error)) {
         return VirtualFileMode::Mac;
+    } else if (isVfsPluginAvailable(VirtualFileMode::Linux, error)) {
+        return VirtualFileMode::Linux;
     }
 
     return VirtualFileMode::Off;

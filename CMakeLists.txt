@@ -169,6 +169,9 @@ option(BUILD_GUI_LEGACY "BUILD_GUI_LEGACY" OFF)
 # build the tests
 option(BUILD_UNIT_TESTS "BUILD_UNIT_TESTS" OFF)
 
+# this option builds the Linux VFS plugin used by Lite Sync
+option(BUILD_LINUX_VFS "Build the Linux VFS (Lite Sync) plugin" OFF)
+
 if(APPLE)
     # build uninstaller
     option(BUILD_UNINSTALLER "BUILD_UNINSTALLER" ON)

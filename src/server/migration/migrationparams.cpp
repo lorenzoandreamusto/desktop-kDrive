@@ -410,7 +410,7 @@ ExitCode MigrationParams::loadAccount(QSettings &settings) {
             QString vfsModeStr = settings.value(QString(virtualFilesModeC), "off").toString();
 
             // Check vfs support
-            bool supportVfs = CommonUtility::isNTFS(localPath) || CommonUtility::isAPFS(localPath);
+            bool supportVfs = CommonUtility::isLiteSyncCompatible(localPath);
             sync.setSupportVfs(supportVfs);
             sync.setVirtualFileMode(modeFromString(vfsModeStr));
             sync.setNavigationPaneClsid(settings.value(QString(navigationPaneClsidC)).toString().toStdString());

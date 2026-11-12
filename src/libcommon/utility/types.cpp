@@ -627,6 +627,8 @@ std::string toString(const VirtualFileMode e) {
             return "Win";
         case VirtualFileMode::Mac:
             return "Mac";
+        case VirtualFileMode::Linux:
+            return "Linux";
         default:
             return noConversionStr;
     }

@@ -431,6 +431,8 @@ void AppServer::init() {
     if (KDC::isVfsPluginAvailable(VirtualFileMode::Win, error)) LOG_INFO(_logger, "VFS windows plugin is available");
 #elif defined(KD_MACOS)
     if (KDC::isVfsPluginAvailable(VirtualFileMode::Mac, error)) LOG_INFO(_logger, "VFS mac plugin is available");
+#elif defined(KD_LINUX)
+    if (KDC::isVfsPluginAvailable(VirtualFileMode::Linux, error)) LOG_INFO(_logger, "VFS linux plugin is available");
 #endif
 
     if (useCommManager(false)) {

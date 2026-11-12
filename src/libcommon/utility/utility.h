@@ -59,6 +59,8 @@ static const std::string HFS = "HFS";
 static const std::string FAT = "FAT32";
 static const std::string EXFAT = "EXFAT";
 static const std::string EXT234 = "EXT234";
+static const std::string XFS = "XFS";
+static const std::string BTRFS = "BTRFS";
 } // namespace fsType
 
 struct COMMON_EXPORT CommonUtility {
@@ -117,6 +119,7 @@ struct COMMON_EXPORT CommonUtility {
 
         static bool isSyncCompatible(const SyncPath &targetPath);
         static bool isLiteSyncCompatible(const SyncPath &targetPath);
+        static bool isLiteSyncCompatibleFsType(const std::string &fsName);
 
         static qint64 freeDiskSpace(const QString &path);
         static void crash();

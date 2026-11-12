@@ -70,7 +70,7 @@ ExitInfo UtilityBestVfsAvailableModeJob::process() {
 
     // Checking the compatibility of the filesystem with LiteSync
     if (!CommonUtility::isLiteSyncCompatible(_path)) {
-        LOGW_DEBUG(_logger, L"VFS is only available for NTFS or APFS file systems: " << Utility::formatSyncPath(_path));
+        LOGW_DEBUG(_logger, L"The file system does not support Lite Sync: " << Utility::formatSyncPath(_path));
         _bestMode = VirtualFileMode::Off;
         return ExitCode::Ok;
     }

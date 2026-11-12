@@ -282,6 +282,8 @@ endif()
 
 if(WIN32 AND TARGET "${APPLICATION_EXECUTABLE}_vfs_win")
     add_dependencies(${APPLICATION_EXECUTABLE} "${APPLICATION_EXECUTABLE}_vfs_win")
+elseif(BUILD_LINUX_VFS AND TARGET "${APPLICATION_EXECUTABLE}_vfs_linux")
+    add_dependencies(${APPLICATION_EXECUTABLE} "${APPLICATION_EXECUTABLE}_vfs_linux")
 endif()
 
 # Precompiled headers

@@ -60,6 +60,7 @@ class TestUtility : public CppUnit::TestFixture, public TestBase {
         CPPUNIT_TEST(testIsSameOrParentPath);
         CPPUNIT_TEST(testFileSystemInfo);
         CPPUNIT_TEST(testFileSystemType);
+        CPPUNIT_TEST(testIsLiteSyncCompatibleFsType);
         CPPUNIT_TEST(testS2ws);
         CPPUNIT_TEST(testWs2s);
         CPPUNIT_TEST(testLtrim);
@@ -124,6 +125,7 @@ class TestUtility : public CppUnit::TestFixture, public TestBase {
         void testIsSameOrParentPath();
         void testFileSystemInfo();
         void testFileSystemType();
+        void testIsLiteSyncCompatibleFsType();
         void testS2ws();
         void testWs2s();
         void testLtrim();

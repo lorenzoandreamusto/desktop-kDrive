@@ -360,14 +360,27 @@ bool CommonUtility::isSyncCompatible([[maybe_unused]] const SyncPath &targetPath
 #endif
 }
 
-bool CommonUtility::isLiteSyncCompatible([[maybe_unused]] const SyncPath &targetPath) {
-    // Only File Systems supporting sparse files are compatible
-#if defined(KD_MACOS)
-    return CommonUtility::isAPFS(targetPath);
-#elif defined(KD_WINDOWS)
-    return CommonUtility::isNTFS(targetPath);
+bool CommonUtility::isLiteSyncCompatible(const SyncPath &targetPath) {
+#if defined(KD_LINUX)
+    // fileSystemType() falls back to the local file system type for unmanaged mounts, which would hide network and
+    // virtual file systems. Use the raw type on Linux to keep Lite Sync limited to local file systems.
+    std::string fsName;
+    SyncPath mountPoint;
+    if (!fileSystemInfo(targetPath, fsName, mountPoint)) return false;
+    return isLiteSyncCompatibleFsType(fsName);
 #else
-    return false;
+    return isLiteSyncCompatibleFsType(fileSystemType(targetPath));
+#endif
+}
+
+bool CommonUtility::isLiteSyncCompatibleFsType(const std::string &fsName) {
+    // Only file systems supporting sparse files and extended attributes are compatible.
+#if defined(KD_MACOS)
+    return fsName == fsType::APFS;
+#elif defined(KD_WINDOWS)
+    return fsName == fsType::NTFS;
+#else
+    return fsName == fsType::EXT234 || fsName == fsType::XFS || fsName == fsType::BTRFS;
 #endif
 }
 

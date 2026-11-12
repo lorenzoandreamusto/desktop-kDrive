@@ -832,13 +832,15 @@ ExitInfo ServerRequests::addSync(const DriveDbId driveDbId, const SyncPath &loca
     sync.setPaused(false);
 
     // Check vfs support
-    const bool supportVfs = CommonUtility::isNTFS(sync.localPath()) || CommonUtility::isAPFS(sync.localPath());
+    const bool supportVfs = CommonUtility::isLiteSyncCompatible(sync.localPath());
     sync.setSupportVfs(supportVfs);
 
 #if defined(KD_MACOS)
     sync.setVirtualFileMode(liteSync ? VirtualFileMode::Mac : VirtualFileMode::Off);
 #elif defined(KD_WINDOWS)
     sync.setVirtualFileMode(liteSync ? VirtualFileMode::Win : VirtualFileMode::Off);
+#elif defined(KD_LINUX)
+    sync.setVirtualFileMode(liteSync ? VirtualFileMode::Linux : VirtualFileMode::Off);
 #else
     sync.setVirtualFileMode(VirtualFileMode::Off);
 #endif

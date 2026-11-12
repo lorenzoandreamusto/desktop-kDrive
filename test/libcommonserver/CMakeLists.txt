@@ -22,6 +22,8 @@ set(testcommonserver_SRCS
         db/testdb.h db/testdb.cpp
         # data
         data/testserverparameters.h data/testserverparameters.cpp
+        # vfs
+        vfs/testvfsmode.h vfs/testvfsmode.cpp
 )
 
 if(APPLE)

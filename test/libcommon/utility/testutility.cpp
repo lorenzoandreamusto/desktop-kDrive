@@ -1111,6 +1111,37 @@ void TestUtility::testFileSystemType() {
 #endif
 }
 
+void TestUtility::testIsLiteSyncCompatibleFsType() {
+#if defined(KD_MACOS)
+    CPPUNIT_ASSERT(CommonUtility::isLiteSyncCompatibleFsType(fsType::APFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::NTFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::HFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::EXFAT));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::FAT));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::EXT234));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::XFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::BTRFS));
+#elif defined(KD_WINDOWS)
+    CPPUNIT_ASSERT(CommonUtility::isLiteSyncCompatibleFsType(fsType::NTFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::APFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::EXFAT));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::EXT234));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::XFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::BTRFS));
+#else
+    CPPUNIT_ASSERT(CommonUtility::isLiteSyncCompatibleFsType(fsType::EXT234));
+    CPPUNIT_ASSERT(CommonUtility::isLiteSyncCompatibleFsType(fsType::XFS));
+    CPPUNIT_ASSERT(CommonUtility::isLiteSyncCompatibleFsType(fsType::BTRFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::NTFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::APFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::HFS));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::EXFAT));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(fsType::FAT));
+#endif
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType(""));
+    CPPUNIT_ASSERT(!CommonUtility::isLiteSyncCompatibleFsType("UNKNOWN"));
+}
+
 void TestUtility::testS2ws() {
     CPPUNIT_ASSERT(CommonUtility::s2ws("abcd") == L"abcd");
     CPPUNIT_ASSERT(CommonUtility::s2ws("éèêà") == L"éèêà");
