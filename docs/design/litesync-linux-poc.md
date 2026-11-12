@@ -300,10 +300,15 @@ The plugin must implement every pure virtual of `KDC::Vfs`. POC-critical semanti
 | `src/server/vfs/linux/placeholdermetadata.h` | Attribute names and value helpers (`user.kDrive.status`, `user.kDrive.pinstate`) |
 | `src/server/vfs/linux/placeholdermetadata.cpp` | Read/write/remove attributes with `IoHelper` primitives |
 | `src/server/vfs/linux/nodemap.h` | Path-to-node mapping and inode allocation for the FUSE tree |
-| `test/libcommonserver/vfs/testlinuxvfs.h` | Unit tests for placeholder metadata, pin state and the node map |
-| `test/libcommonserver/vfs/testlinuxvfs.cpp` | Unit tests, no real mount or root privileges required |
+| `test/libcommonserver/vfs/testlinuxvfs.h` | CppUnit suite for placeholder metadata, pin state and the node map |
+| `test/libcommonserver/vfs/testlinuxvfs.cpp` | CppUnit wrappers that execute the shared checks; no real mount or root privileges required |
+| `test/libcommonserver/vfs/linux/testlinuxvfs_checks.h` | Pure C++20 checks shared by CppUnit and the standalone harness |
+| `test/libcommonserver/vfs/linux/testlinuxvfs_checks.cpp` | Executable assertions for metadata, xattrs, status/progress, pin state and NodeMap |
+| `test/libcommonserver/vfs/linux/testlinuxvfs_standalone.cpp` | Standalone `main` that runs every shared check and exits non-zero on failure |
+| `test/libcommonserver/vfs/linux/standalone_stubs/` | Minimal Qt/Poco-free type, IoHelper/xattr and log stubs for the standalone harness |
 | `litesync-exclude-linux.lst` | Placeholder exclusion list for Linux indexers (empty/comment-only in the POC) |
 | `infomaniak-build-tools/linux/build-and-test-linux-vfs.sh` | Installs the Linux dependencies, builds with `BUILD_LINUX_VFS=ON` and runs the unit tests |
+| `infomaniak-build-tools/linux/run-linux-vfs-standalone-tests.sh` | Compiles and runs the real metadata/NodeMap checks with g++, without Qt/Poco or a FUSE mount |
 
 ### 5.2 Modified files
 
@@ -576,22 +581,48 @@ The build files now reference every new phase 3–6 source and test:
 - `src/server/vfs/linux/CMakeLists.txt` builds and installs `vfs_linux.cpp`,
   `fusesession.cpp`, `nodemap.cpp` and `placeholdermetadata.cpp` in the
   `kDrive_vfs_linux` plugin target with `PkgConfig::FUSE3` and `Threads::Threads`.
-- `test/libcommonserver/CMakeLists.txt` adds `testlinuxvfs.cpp`, the real `nodemap.cpp`
-  and `placeholdermetadata.cpp` to `kDrive_test_common_server` on `UNIX AND NOT APPLE`;
-  the tests are registered in `test/libcommonserver/test.cpp` under `KD_LINUX`.
+- `test/libcommonserver/CMakeLists.txt` adds `testlinuxvfs.cpp`,
+  `testlinuxvfs_checks.cpp`, the real `nodemap.cpp` and `placeholdermetadata.cpp` to
+  `kDrive_test_common_server` on `UNIX AND NOT APPLE`; the tests are registered in
+  `test/libcommonserver/test.cpp` under `KD_LINUX`.
 - `CMakeLists.txt` and `test/libparms/CMakeLists.txt` install
   `litesync-exclude-linux.lst`; `build-and-test-linux-vfs.sh` copies that file (not the
   macOS list) to the test binary directory.
 - The Linux AppImage scripts enable the plugin, preserve `usr/lib/kDrive/plugins`, and
   bundle the FUSE library, helper and exclusion list.
 
-This checkout could not run the full CMake build: Qt, Poco, log4cplus and libfuse3 are not
-installed in the environment. The platform-independent implementation was compiled and
-run directly with g++ against the real `nodemap.cpp` and `placeholdermetadata.cpp` (with
-minimal stubs only for project-wide types and log macros, and with real Linux xattr
-syscalls): all checks for stable inodes, subtree rename/erase, status `O`/`F`/`H`,
-progress clamping, pin state, node id and removal passed. The syntax-only compile of
-`fusesession.cpp` and `vfs_linux.cpp` also passes against the local FUSE 3 headers.
+The real checks are executable without Qt/Poco through the shared helper and the
+standalone harness:
+
+```bash
+./infomaniak-build-tools/linux/run-linux-vfs-standalone-tests.sh
+# Optional sanitizer run:
+KDRIVE_STANDALONE_SANITIZERS=address,undefined \
+    ./infomaniak-build-tools/linux/run-linux-vfs-standalone-tests.sh
+```
+
+The harness compiles the real `nodemap.cpp` and `placeholdermetadata.cpp` with the
+standalone stubs and real Linux xattr syscalls, then executes the same checks used by
+the CppUnit suite. Last run output:
+
+```text
+[PASS] placeholder metadata write/read
+[PASS] placeholder status transitions
+[PASS] placeholder pin state
+[PASS] placeholder remove
+[PASS] regular file is not a placeholder
+[PASS] node map stable inodes
+[PASS] node map rename
+[PASS] node map directory rename
+[PASS] node map erase and clear
+All standalone Linux VFS checks passed
+```
+
+A real CMake configure was attempted in this checkout. It failed before reaching the
+plugin or test targets because `src/3rdparty/utf8proc` is an uninitialized submodule
+(no `CMakeLists.txt`) and `find_package(Qt6)` cannot find Qt6. `libfuse3-dev` also has no
+apt candidate in this environment. The syntax-only compile of `fusesession.cpp` and
+`vfs_linux.cpp` passes against the local FUSE 3 headers.
 
 The remaining validation is the full Qt/Conan build and the real mount/hydration scenario
 on an Ubuntu desktop with `/dev/fuse` and a kDrive account; neither can run here.

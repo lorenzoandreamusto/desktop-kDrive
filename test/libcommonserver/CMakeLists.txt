@@ -34,6 +34,7 @@ elseif(UNIX AND NOT APPLE)
     # depend on libfuse3, so they can be tested without a mount or root privileges.
     list(APPEND testcommonserver_SRCS
             vfs/testlinuxvfs.h vfs/testlinuxvfs.cpp
+            vfs/linux/testlinuxvfs_checks.h vfs/linux/testlinuxvfs_checks.cpp
             ../../src/server/vfs/linux/nodemap.h ../../src/server/vfs/linux/nodemap.cpp
             ../../src/server/vfs/linux/placeholdermetadata.h ../../src/server/vfs/linux/placeholdermetadata.cpp)
 elseif(WIN32)

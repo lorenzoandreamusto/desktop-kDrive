@@ -348,14 +348,32 @@ a manual test on an Ubuntu desktop. The hydrate-on-open path is implemented with
 the existing direct-download jobs; the plugin blocks the FUSE open until the
 placeholder is hydrated or the timeout expires.
 
+The real metadata and NodeMap checks can also be run without Qt/Poco or a FUSE
+mount:
+
+```bash
+./infomaniak-build-tools/linux/run-linux-vfs-standalone-tests.sh
+# With sanitizers:
+KDRIVE_STANDALONE_SANITIZERS=address,undefined \
+    ./infomaniak-build-tools/linux/run-linux-vfs-standalone-tests.sh
+```
+
+The harness compiles the real `nodemap.cpp` and `placeholdermetadata.cpp` with
+minimal Qt/Poco-free stubs and real Linux xattr syscalls, and runs the same
+checks as `kDrive_test_common_server`. Last run output: nine `[PASS]` groups for
+placeholder metadata, status/progress, pin state, removal, regular-file
+classification, stable inodes, rename, directory rename and erase/clear, ending
+with `All standalone Linux VFS checks passed`. Exit code was 0, including under
+AddressSanitizer and UBSan.
+
 Build-system and verification state: the plugin target lists all phase 3–6
 sources and links `PkgConfig::FUSE3` and `Threads::Threads`; `kDrive_test_common_server`
-compiles the real node-map and placeholder-metadata sources on Linux. In this
-environment the full CMake/Qt build could not run because Qt, Poco, log4cplus and
-libfuse3 are absent. The portable parts were compiled and executed directly with
-g++ against the real implementation and real Linux xattr syscalls; all node-map,
-subtree rename/erase, status, progress, pin-state, node-id and removal checks
-passed (`All standalone Linux VFS checks passed`). The FUSE session and plugin
+compiles the real node-map and placeholder-metadata sources on Linux. A real
+CMake configure was attempted here but stopped before the plugin/test targets:
+`src/3rdparty/utf8proc` is an uninitialized submodule and `find_package(Qt6)`
+cannot find Qt6. `libfuse3-dev` also has no apt candidate in this environment,
+so the full plugin build and `kDrive_test_common_server` execution remain to be
+verified on the Ubuntu/Conan build environment. The FUSE session and plugin
 still need the full Ubuntu desktop validation described in the design document.
 
 The release scripts (`build-release-appimage.sh` and `build-release-amd64.sh`) now enable

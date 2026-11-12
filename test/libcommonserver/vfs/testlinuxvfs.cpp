@@ -18,12 +18,29 @@
 
 #include "testlinuxvfs.h"
 
-#include "server/vfs/linux/nodemap.h"
-#include "server/vfs/linux/placeholdermetadata.h"
+#include "linux/testlinuxvfs_checks.h"
 
 #include <fstream>
+#include <string>
+#include <vector>
 
 namespace KDC {
+
+namespace {
+
+void assertChecks(const std::vector<std::string> &failures) {
+    if (failures.empty()) {
+        return;
+    }
+
+    std::string message = "Linux VFS check failed:";
+    for (const auto &failure: failures) {
+        message += "\n- " + failure;
+    }
+    CPPUNIT_FAIL(message);
+}
+
+} // namespace
 
 void TestPlaceholderMetadata::setUp() {
     TestBase::start();
@@ -40,139 +57,57 @@ void TestPlaceholderMetadata::tearDown() {
 }
 
 void TestPlaceholderMetadata::testWriteAndRead() {
-    constexpr int64_t size = 4096;
-    constexpr time_t modificationTime = 1700000000;
-
-    CPPUNIT_ASSERT(PlaceholderMetadata::write(_filePath, size, modificationTime, "remote-node-id", false));
-
-    PlaceholderInfo info;
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(info.isPlaceholder);
-    CPPUNIT_ASSERT(!info.isHydrated);
-    CPPUNIT_ASSERT(!info.isSyncing);
-    CPPUNIT_ASSERT_EQUAL(size, info.size);
-    CPPUNIT_ASSERT_EQUAL(modificationTime, info.modificationTime);
-    CPPUNIT_ASSERT(info.nodeId == "remote-node-id");
-    CPPUNIT_ASSERT(info.pinState == PinState::OnlineOnly);
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkPlaceholderWriteAndRead(_filePath, failures);
+    assertChecks(failures);
 }
 
 void TestPlaceholderMetadata::testStatusTransitions() {
-    CPPUNIT_ASSERT(PlaceholderMetadata::write(_filePath, 1024, 1700000000, "node", true));
-
-    PlaceholderInfo info;
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(info.isHydrated);
-
-    CPPUNIT_ASSERT(PlaceholderMetadata::setStatus(_filePath, false, true, 42));
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(!info.isHydrated);
-    CPPUNIT_ASSERT(info.isSyncing);
-    CPPUNIT_ASSERT_EQUAL(static_cast<int16_t>(42), info.progress);
-
-    CPPUNIT_ASSERT(PlaceholderMetadata::setStatus(_filePath, false));
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(!info.isHydrated);
-    CPPUNIT_ASSERT(!info.isSyncing);
-    CPPUNIT_ASSERT_EQUAL(static_cast<int16_t>(0), info.progress);
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkPlaceholderStatusTransitions(_filePath, failures);
+    assertChecks(failures);
 }
 
 void TestPlaceholderMetadata::testPinState() {
-    CPPUNIT_ASSERT(PlaceholderMetadata::write(_filePath, 0, 0, "", true));
-
-    PlaceholderInfo info;
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(info.pinState == PinState::AlwaysLocal);
-
-    CPPUNIT_ASSERT(PlaceholderMetadata::setPinState(_filePath, PinState::OnlineOnly));
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(info.pinState == PinState::OnlineOnly);
-
-    CPPUNIT_ASSERT(PlaceholderMetadata::setPinState(_filePath, PinState::Unspecified));
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(info.pinState == PinState::Unspecified);
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkPlaceholderPinState(_filePath, failures);
+    assertChecks(failures);
 }
 
 void TestPlaceholderMetadata::testRemove() {
-    CPPUNIT_ASSERT(PlaceholderMetadata::write(_filePath, 10, 1700000000, "node", false));
-    CPPUNIT_ASSERT(PlaceholderMetadata::remove(_filePath));
-
-    PlaceholderInfo info;
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(!info.isPlaceholder);
-    CPPUNIT_ASSERT(info.isHydrated);
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkPlaceholderRemove(_filePath, failures);
+    assertChecks(failures);
 }
 
 void TestPlaceholderMetadata::testRegularFileIsNotPlaceholder() {
-    PlaceholderInfo info;
-    CPPUNIT_ASSERT(PlaceholderMetadata::read(_filePath, info));
-    CPPUNIT_ASSERT(!info.isPlaceholder);
-    CPPUNIT_ASSERT(info.isHydrated);
-    CPPUNIT_ASSERT_EQUAL(static_cast<int64_t>(0), info.size);
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkRegularFileIsNotPlaceholder(_filePath, failures);
+    assertChecks(failures);
 }
 
 void TestNodeMap::testStableInodes() {
-    NodeMap nodeMap;
-
-    CPPUNIT_ASSERT_EQUAL(NodeMap::rootInode, nodeMap.inodeFor({}));
-    const uint64_t inode = nodeMap.inodeFor("/sync/folder/file.txt");
-    CPPUNIT_ASSERT(inode > NodeMap::rootInode);
-    CPPUNIT_ASSERT_EQUAL(inode, nodeMap.inodeFor("/sync/folder/file.txt"));
-    CPPUNIT_ASSERT_EQUAL(static_cast<size_t>(1), nodeMap.size());
-
-    const auto path = nodeMap.pathFor(inode);
-    CPPUNIT_ASSERT(path.has_value());
-    CPPUNIT_ASSERT(path.value() == SyncPath("/sync/folder/file.txt"));
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkNodeMapStableInodes(failures);
+    assertChecks(failures);
 }
 
 void TestNodeMap::testRename() {
-    NodeMap nodeMap;
-    const uint64_t inode = nodeMap.inodeFor("/sync/file.txt");
-
-    nodeMap.rename("/sync/file.txt", "/sync/renamed.txt");
-
-    const auto path = nodeMap.pathFor(inode);
-    CPPUNIT_ASSERT(path.has_value());
-    CPPUNIT_ASSERT(path.value() == SyncPath("/sync/renamed.txt"));
-    CPPUNIT_ASSERT_EQUAL(inode, nodeMap.inodeFor("/sync/renamed.txt"));
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkNodeMapRename(failures);
+    assertChecks(failures);
 }
 
 void TestNodeMap::testRenameDirectory() {
-    NodeMap nodeMap;
-    const uint64_t directoryInode = nodeMap.inodeFor("/sync/dir");
-    const uint64_t childInode = nodeMap.inodeFor("/sync/dir/file.txt");
-    const uint64_t otherInode = nodeMap.inodeFor("/sync/other.txt");
-
-    nodeMap.rename("/sync/dir", "/sync/moved");
-
-    const auto directoryPath = nodeMap.pathFor(directoryInode);
-    CPPUNIT_ASSERT(directoryPath.has_value());
-    CPPUNIT_ASSERT(directoryPath.value() == SyncPath("/sync/moved"));
-
-    const auto childPath = nodeMap.pathFor(childInode);
-    CPPUNIT_ASSERT(childPath.has_value());
-    CPPUNIT_ASSERT(childPath.value() == SyncPath("/sync/moved/file.txt"));
-    CPPUNIT_ASSERT_EQUAL(childInode, nodeMap.inodeFor("/sync/moved/file.txt"));
-
-    const auto otherPath = nodeMap.pathFor(otherInode);
-    CPPUNIT_ASSERT(otherPath.has_value());
-    CPPUNIT_ASSERT(otherPath.value() == SyncPath("/sync/other.txt"));
-
-    nodeMap.erase("/sync/moved");
-    CPPUNIT_ASSERT_EQUAL(static_cast<size_t>(1), nodeMap.size());
-    CPPUNIT_ASSERT(nodeMap.pathFor(otherInode).has_value());
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkNodeMapRenameDirectory(failures);
+    assertChecks(failures);
 }
 
 void TestNodeMap::testEraseAndClear() {
-    NodeMap nodeMap;
-    nodeMap.inodeFor("/sync/file.txt");
-    nodeMap.erase("/sync/file.txt");
-    CPPUNIT_ASSERT_EQUAL(static_cast<size_t>(0), nodeMap.size());
-
-    const uint64_t first = nodeMap.inodeFor("/sync/first.txt");
-    nodeMap.clear();
-    CPPUNIT_ASSERT_EQUAL(static_cast<size_t>(0), nodeMap.size());
-    CPPUNIT_ASSERT(first > NodeMap::rootInode);
-    CPPUNIT_ASSERT_EQUAL(NodeMap::rootInode + 1, nodeMap.inodeFor("/sync/second.txt"));
+    std::vector<std::string> failures;
+    TestLinuxVfs::checkNodeMapEraseAndClear(failures);
+    assertChecks(failures);
 }
 
 } // namespace KDC
