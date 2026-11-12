@@ -267,6 +267,11 @@ if [[ "$enable_update" == true ]]; then
   conan_install_cmd+=(--update)
 fi
 
+# Limit parallelism when requested (useful on low-memory build machines).
+if [[ -n "${KDRIVE_BUILD_JOBS:-}" ]]; then
+  conan_install_cmd+=(-c "tools.build:jobs=${KDRIVE_BUILD_JOBS}")
+fi
+
 "${conan_install_cmd[@]}"
 
 

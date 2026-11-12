@@ -12,8 +12,10 @@
         - [Configuration](#configuration)
         - [Debugging](#debugging)
 - [Build in Release](#build-in-release)
-    - [Podman Image](#podman-image)
+    - [Podman prerequisites](#podman-prerequisites)
+    - [Podman image](#podman-image)
     - [Building](#building)
+        - [Qt account](#qt-account)
 
 # kDrive files
 
@@ -299,25 +301,81 @@ The log files will be generated in the `/tmp/kDrive-logdir` directory.
 
 # Build in Release
 
-Currently, the release appImage file is generated in a podman container.
+The release AppImage is generated in a Podman container so that the build does not depend on the host distribution.
+
+## Podman prerequisites
+
+- Podman installed. Podman runs natively on Linux; on macOS the wrapper uses a Podman machine named
+  `build_kdrive` (override it with `KDRIVE_PODMAN_MACHINE`).
+- Git submodules initialized:
+  ```bash
+  git submodule update --init --recursive
+  ```
+- About 20 GB of free disk space and enough memory for the C++ build. Compilation parallelism (Conan and
+  CMake) can be limited with `KDRIVE_BUILD_JOBS` (defaults to `nproc`), for example `KDRIVE_BUILD_JOBS=4`.
 
 ## Podman image
 
-You will need Podman installed for this step, as currently our building script runs through a podman container.
+The published build image already contains the complete toolchain (Conan, the Qt Online Installer,
+linuxdeploy and its plugins, appimagetool and sentry-cli):
 
-To pull the podman image from our github, run :
 ```bash
 podman pull ghcr.io/infomaniak/kdrive-desktop-linux:latest
 ```
 
+That image is the one used by CI. The current sources also need `libfuse3-dev` (Lite Sync plugin) and
+`libc-ares-dev` (Sentry recipe), which the published image does not provide. For local builds, build the
+small derived image:
+
+```bash
+./infomaniak-build-tools/linux/build-podman-image.sh
+```
+
+The script builds `infomaniak-build-tools/linux/Containerfile` and tags the result
+`localhost/kdrive-desktop-linux:latest`.
+
 ## Building
 
-You can start a Linux build with the script located in `infomaniak-build-tools/linux/build-release-via-podman.sh`.
-The script starts a Podman machine from the image pulled using the command above, then runs `build-release-appimage.sh` inside the container.
-The architecture (`amd64` or `arm64`) used for building is the host architecture, and the script passes it to Podman with `--platform linux/<arch>`.
-If you do not want to build through podman, use the `build-release-appimage.sh` script directly.
+Start a Linux build with the script located in `infomaniak-build-tools/linux/build-release-via-podman.sh`.
+It mounts the git directory to `/src`, the build directory to `/build` and the install directory to
+`/install`, then runs `build-release-appimage.sh` inside the container.
 
-The generated AppImage file will be located in the `build-linux-[arch]/install` directory.
+```bash
+./infomaniak-build-tools/linux/build-release-via-podman.sh
+```
+
+- Local builds use `localhost/kdrive-desktop-linux:latest` by default; CI keeps using the published image.
+  Override the image with `--image` or `KDRIVE_LINUX_BUILD_IMAGE`, for example:
+  ```bash
+  KDRIVE_LINUX_BUILD_IMAGE=ghcr.io/infomaniak/kdrive-desktop-linux:latest \
+      ./infomaniak-build-tools/linux/build-release-via-podman.sh
+  ```
+- The architecture (`amd64` or `arm64`) is the host architecture and is passed to Podman with
+  `--platform linux/<arch>`.
+- The Conan cache is persisted in `~/.conan2_linux` and mounted under `/root/.conan2`.
+- `APPIMAGE_EXTRACT_AND_RUN=1` is set because a rootless container does not provide a usable FUSE mount
+  for `appimagetool`.
+- `QT_ACCOUNT_EMAIL`, `QT_ACCOUNT_PASSWORD` and `QT_INSTALLER_JWT_TOKEN` are forwarded to the container.
+
+### Qt account
+
+The Qt Online Installer needs a Qt account. For local builds, either:
+
+- place `qtaccount.ini` in `~/.conan2_linux/.local/share/Qt/qtaccount.ini`, which is mounted into the
+  container:
+  ```bash
+  mkdir -p ~/.conan2_linux/.local/share/Qt
+  cp ~/.local/share/Qt/qtaccount.ini ~/.conan2_linux/.local/share/Qt/
+  ```
+- let the installer prompt for credentials in the terminal (an interactive shell is required).
+
+CI uses `QT_ACCOUNT_EMAIL` and `QT_ACCOUNT_PASSWORD`.
+
+If you do not want to build through Podman, use the `build-release-appimage.sh` script directly from a
+compatible Linux environment.
+
+The generated AppImage file will be located in the `build-linux-[arch]/install` directory, for example
+`build-linux-amd64/install/kDrive-<version>-amd64.AppImage`.
 
 ## Lite Sync on Linux (POC)
 

@@ -39,6 +39,13 @@
 #include <sys/xattr.h>
 #include <unistd.h>
 
+// Recent kernel headers expose FUSE_SUPER_MAGIC, but the older linux-libc-dev
+// shipped by some distributions (for example Ubuntu 22.04 with Linux 5.15)
+// does not. The value is part of the stable kernel ABI.
+#ifndef FUSE_SUPER_MAGIC
+#define FUSE_SUPER_MAGIC 0x65735546
+#endif
+
 namespace KDC {
 
 FuseSession::FuseSession(SyncPath sourceRoot, SyncPath mountPoint, log4cplus::Logger logger, HydrationHandler hydrationHandler) :

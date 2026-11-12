@@ -38,3 +38,42 @@ function get_default_src_dir() {
      echo "$PWD"
     fi
 }
+
+function get_host_os() {
+    uname -s
+}
+
+function get_podman_machine_name() {
+    echo "${KDRIVE_PODMAN_MACHINE:-build_kdrive}"
+}
+
+# Podman runs natively on Linux; only macOS needs a Podman machine.
+function start_podman_machine() {
+    if [[ "$(get_host_os)" != "Darwin" ]]; then
+        return 0
+    fi
+
+    local machine_name
+    machine_name="$(get_podman_machine_name)"
+
+    if ! podman machine inspect "$machine_name" >/dev/null 2>&1; then
+        echo "Podman machine '$machine_name' does not exist, initializing it..." >&2
+        podman machine init "$machine_name"
+    fi
+
+    # 'podman machine start' fails when the machine is already running.
+    podman machine start "$machine_name" >/dev/null 2>&1 || true
+
+    if ! podman info >/dev/null 2>&1; then
+        echo "Failed to start the Podman machine '$machine_name'." >&2
+        return 1
+    fi
+}
+
+function stop_podman_machine() {
+    if [[ "$(get_host_os)" != "Darwin" ]]; then
+        return 0
+    fi
+
+    podman machine stop "$(get_podman_machine_name)" >/dev/null 2>&1 || true
+}

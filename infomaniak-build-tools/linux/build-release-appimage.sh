@@ -122,7 +122,7 @@ function build_client_via_cmake() {
   fi
   CMAKE_PARAMS+=(-DBUILD_LINUX_VFS=ON)
 
-  cmake -DCMAKE_PREFIX_PATH="$QT_BASE_DIR" \
+  if ! cmake -DCMAKE_PREFIX_PATH="$QT_BASE_DIR" \
       -DCMAKE_INSTALL_PREFIX=/usr \
       -DQT_FEATURE_neon="$qt_neon_activation" \
       -DCMAKE_MODULE_PATH="$QT_BASE_DIR/lib/cmake/" \
@@ -132,8 +132,15 @@ function build_client_via_cmake() {
       -DCONAN_DEP_DIR="$conan_dependencies_folder" \
       -DCMAKE_TOOLCHAIN_FILE="$conan_toolchain_file" \
       "${CMAKE_PARAMS[@]}" \
-      /src
-  make "-j$(nproc)"
+      /src; then
+    echo "ERROR: CMake configuration failed." >&2
+    exit 1
+  fi
+
+  if ! make "-j${KDRIVE_BUILD_JOBS:-$(nproc)}"; then
+    echo "ERROR: Build failed." >&2
+    exit 1
+  fi
 
   objcopy --only-keep-debug ./bin/kDrive ../kDrive.dbg
   objcopy --strip-debug ./bin/kDrive
@@ -146,7 +153,10 @@ function build_client_via_cmake() {
   bundle_sources_for_sentry ../kDrive.dbg
   bundle_sources_for_sentry ../kDrive_client.dbg
 
-  make DESTDIR=/app install
+  if ! make DESTDIR=/app install; then
+    echo "ERROR: Installation failed." >&2
+    exit 1
+  fi
 }
 
 function bundle_sources_for_sentry() {

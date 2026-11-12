@@ -22,6 +22,7 @@ script_directory_path="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 source "$script_directory_path/build-utils.sh"
 
 git_dir="$(get_default_src_dir)"
+program_name="$(basename "$0")"
 
 function display_help {
   echo "$program_name [-h] [-d git-directory]"
