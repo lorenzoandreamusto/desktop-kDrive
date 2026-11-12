@@ -19,7 +19,7 @@
 #
 
 # Installs the Linux build dependencies of kDrive Desktop, builds the Linux VFS (Lite Sync) plugin together with the
-# unit test binaries and runs the test suites that cover the phase 1 work.
+# unit test binaries and runs the test suites that cover phases 1-6 of the LinuxVFS design.
 #
 # Usage: infomaniak-build-tools/linux/build-and-test-linux-vfs.sh [options]
 #
@@ -345,9 +345,7 @@ configure_and_build() {
 
     cp "$repo_root/sync-exclude-linux.lst" "$build_dir/bin/sync-exclude.lst"
     cp "$repo_root/sync-folder-rules-linux.csv" "$build_dir/bin/sync-folder-rules.csv"
-    if [[ -f "$repo_root/litesync-exclude.lst" ]]; then
-        cp "$repo_root/litesync-exclude.lst" "$build_dir/bin/litesync-exclude.lst"
-    fi
+    cp "$repo_root/litesync-exclude-linux.lst" "$build_dir/bin/litesync-exclude.lst"
 }
 
 run_tests() {

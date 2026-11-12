@@ -22,7 +22,7 @@ Linux without committing the product to a specific UX.
 
 | Item | Value |
 |---|---|
-| Status | Phases 1–5 implemented; phase 6 implemented for the legacy Qt GUI only (the Linux v4 GUI is not on `develop`). Build and tests not yet verified in CI. |
+| Status | Phases 1–6 implemented (phase 6 for the legacy Qt GUI only; the Linux v4 GUI is not on `develop`). Build-system wiring is complete; standalone Linux VFS tests pass, while full CMake/unit tests still require Qt, Poco, log4cplus and libfuse3. |
 | Target platform | Linux desktop, Ubuntu 22.04/24.04 amd64 first, ARM later |
 | Base branch | `develop` (legacy Qt GUI) unless the QML GUI is in scope, then `protected/linux-v4` |
 | Delivery | Feature flagged, off by default |
@@ -335,9 +335,10 @@ paths are on `develop`.
 | `src/server/comm/guijobs/guijobfactory.cpp:145` | No change expected; verify the best-mode job is reachable on Linux | 1 |
 | `CMakeLists.txt:271` | Install `litesync-exclude-linux.lst` for Linux packages | 4 |
 | `conanfile.py` (`requirements()`) | No change: `libfuse3` comes from the system package and is discovered with `pkg-config` | 1 |
-| `infomaniak-build-tools/linux/build-release-appimage.sh` | Bundle `libfuse3.so` and `fusermount3` | 4 |
-| `infomaniak-build-tools/linux/build-release-via-podman.sh` | Install `libfuse3-dev`; document the missing `/dev/fuse` in containers | 4 |
-| `test/libcommonserver/CMakeLists.txt` | Add the Linux VFS helper sources and tests to the `elseif(UNIX)` branch | 2 |
+| `infomaniak-build-tools/linux/build-release-appimage.sh` | Build with `BUILD_LINUX_VFS=ON`, preserve the plugin, bundle `libfuse3.so`/`fusermount3` and the Linux exclusion list | 4 |
+| `infomaniak-build-tools/linux/build-release-amd64.sh` | Same release-package wiring as the AppImage script, including the FUSE runtime libraries | 4 |
+| `infomaniak-build-tools/linux/build-release-via-podman.sh` | Requires `libfuse3-dev` in the build image; containers still do not provide `/dev/fuse` for integration tests | 4 |
+| `test/libcommonserver/CMakeLists.txt` | Add the Linux VFS helper sources and tests to the `UNIX AND NOT APPLE` branch | 2 |
 | `src/libcommonserver/vfs/vfs.h` | Hydration request callback and `hydrateAllPlaceholders()` default | 3/5 |
 | `src/server/appserver.cpp`, `src/server/appserver.h` | Hydration callback, deactivation pre-hydration | 3/5 |
 | `src/gui/drivepreferenceswidget.cpp` | Enable the Lite Sync confirmation on Linux | 6 |
@@ -520,21 +521,22 @@ component tests only; the integration run is manual and recorded in the POC repo
 
 ## 8. Build, Packaging and Dependencies
 
-- `BUILD_LINUX_VFS` defaults to `OFF`; the release pipeline keeps producing the current
-  binary until the POC is accepted.
+- `BUILD_LINUX_VFS` defaults to `OFF` for ordinary developer builds. The Linux release
+  scripts enable it explicitly with `-DBUILD_LINUX_VFS=ON`; a build without libfuse3 still
+  produces the previous client when the option is left `OFF`.
 - `libfuse3` is the only new native dependency. It is installed as the `libfuse3-dev` system
   package (there is no Conan recipe for it in this project) and discovered with
   `pkg-config` in `src/server/vfs/linux/CMakeLists.txt`; `build-and-test-linux-vfs.sh`
-  installs it.
-- The AppImage must contain `libfuse3.so*` and `fusermount3`; the setuid helper must stay
-  usable inside the AppImage (document the AppImage/FUSE constraint in
-  `infomaniak-build-tools/linux/Readme.md`).
+  installs it, and the Linux build image must provide it for release packaging.
+- The AppImage contains `libfuse3.so*`, the `fusermount3` helper and
+  `litesync-exclude-linux.lst`. The AppDir keeps the plugin in
+  `usr/lib/kDrive/plugins`; removing that directory would make Lite Sync permanently
+  unavailable in the package.
 - The plugin is installed into `PLUGINDIR`
-  (`${CMAKE_INSTALL_FULL_LIBDIR}/kdrive/plugins`) so `addLibraryPath` in
-  `src/server/appserver.cpp:424` finds it without changes. The release pipeline keeps
-  `BUILD_LINUX_VFS=OFF`; packaging the plugin and `libfuse3.so` remains a POC packaging
-  step because the AppImage builder would also need the matching `fusermount3` helper and
-  its setuid/AppImage constraints.
+  (`${CMAKE_INSTALL_FULL_LIBDIR}/${APPLICATION_SHORTNAME}/plugins`) so `addLibraryPath` in
+  `src/server/appserver.cpp:424` finds it without changes. AppImage/FUSE caveat: an AppImage
+  cannot preserve the setuid bit of `fusermount3`; the host must allow the user to mount
+  FUSE filesystems, or the bundled helper must be usable without setuid.
 - Packaging must remain functional when the plugin is absent or `/dev/fuse` is missing:
   the client starts, Lite Sync reports `Off`, sync continues.
 
@@ -566,6 +568,33 @@ Conan dependencies, configures with `-DBUILD_UNIT_TESTS=ON -DBUILD_LINUX_VFS=ON`
 The script does not replace CI: the self-hosted Linux runner remains the reference build,
 and a container or GitHub-hosted runner has no `/dev/fuse`, so the mount integration stays
 manual (section 10).
+
+### Verification state in this environment
+
+The build files now reference every new phase 3–6 source and test:
+
+- `src/server/vfs/linux/CMakeLists.txt` builds and installs `vfs_linux.cpp`,
+  `fusesession.cpp`, `nodemap.cpp` and `placeholdermetadata.cpp` in the
+  `kDrive_vfs_linux` plugin target with `PkgConfig::FUSE3` and `Threads::Threads`.
+- `test/libcommonserver/CMakeLists.txt` adds `testlinuxvfs.cpp`, the real `nodemap.cpp`
+  and `placeholdermetadata.cpp` to `kDrive_test_common_server` on `UNIX AND NOT APPLE`;
+  the tests are registered in `test/libcommonserver/test.cpp` under `KD_LINUX`.
+- `CMakeLists.txt` and `test/libparms/CMakeLists.txt` install
+  `litesync-exclude-linux.lst`; `build-and-test-linux-vfs.sh` copies that file (not the
+  macOS list) to the test binary directory.
+- The Linux AppImage scripts enable the plugin, preserve `usr/lib/kDrive/plugins`, and
+  bundle the FUSE library, helper and exclusion list.
+
+This checkout could not run the full CMake build: Qt, Poco, log4cplus and libfuse3 are not
+installed in the environment. The platform-independent implementation was compiled and
+run directly with g++ against the real `nodemap.cpp` and `placeholdermetadata.cpp` (with
+minimal stubs only for project-wide types and log macros, and with real Linux xattr
+syscalls): all checks for stable inodes, subtree rename/erase, status `O`/`F`/`H`,
+progress clamping, pin state, node id and removal passed. The syntax-only compile of
+`fusesession.cpp` and `vfs_linux.cpp` also passes against the local FUSE 3 headers.
+
+The remaining validation is the full Qt/Conan build and the real mount/hydration scenario
+on an Ubuntu desktop with `/dev/fuse` and a kDrive account; neither can run here.
 
 ---
 

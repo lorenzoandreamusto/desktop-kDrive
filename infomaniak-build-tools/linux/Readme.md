@@ -333,12 +333,35 @@ cmake --build build-linux-vfs --parallel
 
 The helper script `infomaniak-build-tools/linux/build-and-test-linux-vfs.sh`
 installs the system packages, configures the build and runs the Linux VFS unit
-tests. A real mount also needs `/dev/fuse` and `fusermount3`; containers and
+tests. To build and run the same targets manually after the Conan dependencies
+are available:
+
+```bash
+cmake --build build-linux-vfs --parallel \
+    --target kDrive_vfs_linux kDrive_test_common kDrive_test_common_server
+./infomaniak-build-tools/run-test.sh build-linux-vfs/bin kDrive_test_common_server
+```
+
+A real mount also needs `/dev/fuse` and `fusermount3`; containers and
 GitHub-hosted runners usually do not provide them, so mount integration remains
 a manual test on an Ubuntu desktop. The hydrate-on-open path is implemented with
 the existing direct-download jobs; the plugin blocks the FUSE open until the
 placeholder is hydrated or the timeout expires.
 
-The release pipeline keeps `BUILD_LINUX_VFS=OFF`. Packaging the plugin in the
-AppImage additionally requires bundling `libfuse3.so*` and a usable
-`fusermount3`; the setuid/AppImage constraints make that a separate POC step.
+Build-system and verification state: the plugin target lists all phase 3–6
+sources and links `PkgConfig::FUSE3` and `Threads::Threads`; `kDrive_test_common_server`
+compiles the real node-map and placeholder-metadata sources on Linux. In this
+environment the full CMake/Qt build could not run because Qt, Poco, log4cplus and
+libfuse3 are absent. The portable parts were compiled and executed directly with
+g++ against the real implementation and real Linux xattr syscalls; all node-map,
+subtree rename/erase, status, progress, pin-state, node-id and removal checks
+passed (`All standalone Linux VFS checks passed`). The FUSE session and plugin
+still need the full Ubuntu desktop validation described in the design document.
+
+The release scripts (`build-release-appimage.sh` and `build-release-amd64.sh`) now enable
+`BUILD_LINUX_VFS=ON` and package the plugin, `libfuse3.so*`, `fusermount3` and
+`litesync-exclude-linux.lst`. The Linux build image must provide `libfuse3-dev` (and
+`pkg-config`); the scripts fail with an explicit error instead of silently shipping a
+client without the plugin. An AppImage cannot preserve the setuid bit of a bundled
+`fusermount3`, so the target host must permit the user to mount FUSE filesystems. This is
+still a POC packaging constraint, not a production-ready FUSE installation.

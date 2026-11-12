@@ -141,12 +141,19 @@ build_release() {
 
   export KDRIVE_DEBUG=0
 
+  if ! pkg-config --exists fuse3; then
+    echo "ERROR: libfuse3-dev is required to package the Linux Lite Sync plugin." >&2
+    echo "Install libfuse3-dev before building the Linux release." >&2
+    exit 1
+  fi
+
   cmake -B"$build_dir/build" -H"$src_dir" \
       -DQT_FEATURE_neon=OFF \
       -DCMAKE_BUILD_TYPE=$build_type \
       -DCMAKE_INSTALL_PREFIX=/usr \
       -DBIN_INSTALL_DIR="$build_dir/build/bin" \
       -DBUILD_UNIT_TESTS="$build_unit_tests" \
+      -DBUILD_LINUX_VFS=ON \
       -DKDRIVE_THEME_DIR="$src_dir/infomaniak" \
       -DCONAN_DEP_DIR="$conan_dependencies_folder" \
       -DCMAKE_TOOLCHAIN_FILE="$conan_toolchain_file" \
@@ -160,6 +167,7 @@ build_release() {
 
   cp "$src_dir/sync-exclude-linux.lst" "$build_dir/build/bin/sync-exclude.lst"
   cp "$src_dir/sync-folder-rules-linux.csv" "$build_dir/build/bin/sync-folder-rules.csv"
+  cp "$src_dir/litesync-exclude-linux.lst" "$build_dir/build/bin/litesync-exclude.lst"
 } 
 
 package_release() {
@@ -182,9 +190,23 @@ package_release() {
 
   cp -P "$conan_dependencies_folder/"* "$app_dir/usr/lib"
 
+  for fuse_library in /usr/lib/x86_64-linux-gnu/libfuse3.so.3*; do
+    if [ -e "$fuse_library" ]; then
+      cp -P "$fuse_library" "$app_dir/usr/lib/"
+    fi
+  done
+  if command -v fusermount3 >/dev/null 2>&1; then
+    cp -P "$(command -v fusermount3)" "$app_dir/usr/bin/fusermount3"
+  fi
+
   cp -P -r /usr/lib/x86_64-linux-gnu/nss/ "$app_dir/usr/lib/"
 
   cp -P "$QTDIR/lib/libQt6WaylandClient.so"* "$app_dir/usr/lib"
+
+  # Keep the VFS plugin even if GNUInstallDirs selected a multiarch libdir.
+  if [ -d "$app_dir/usr/lib/x86_64-linux-gnu/kDrive" ]; then
+    cp -P -r "$app_dir/usr/lib/x86_64-linux-gnu/kDrive" "$app_dir/usr/lib/"
+  fi
 
   rm -rf "$app_dir/usr/lib/x86_64-linux-gnu/"
   rm -rf "$app_dir/usr/include/"

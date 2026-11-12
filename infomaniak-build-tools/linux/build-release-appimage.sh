@@ -115,6 +115,13 @@ function build_client_via_cmake() {
     qt_neon_activation="OFF"
   fi
 
+  if ! pkg-config --exists fuse3; then
+    echo "ERROR: libfuse3-dev is required to package the Linux Lite Sync plugin." >&2
+    echo "Install libfuse3-dev in the Linux build image before building the AppImage." >&2
+    exit 1
+  fi
+  CMAKE_PARAMS+=(-DBUILD_LINUX_VFS=ON)
+
   cmake -DCMAKE_PREFIX_PATH="$QT_BASE_DIR" \
       -DCMAKE_INSTALL_PREFIX=/usr \
       -DQT_FEATURE_neon="$qt_neon_activation" \
@@ -200,8 +207,10 @@ function move_dependencies() {
     cp -P /usr/lib/$arch-linux-gnu/gio/modules/*.so ./usr/lib/gio/modules/ 2>/dev/null || true
   fi
 
+  # The Linux VFS plugin is installed under usr/lib/kDrive/plugins and is required by Lite Sync.
+  # Keep that directory; only remove CMake and development files below.
   rm -rf "./usr/lib/$arch-linux-gnu/"
-  rm -rf ./usr/lib/kDrive
+  rm -rf ./usr/lib/kDrive/cmake
   rm -rf ./usr/lib/cmake
   rm -rf ./usr/include
   rm -rf ./usr/mkspecs
@@ -209,9 +218,21 @@ function move_dependencies() {
   # Don't bundle kDrivecmd as we don't run it anyway
   rm -rf ./usr/bin/kDrivecmd
 
+  # Bundle the FUSE 3 library used by the Linux VFS plugin. The host still provides /dev/fuse and,
+  # when required by its policy, a setuid fusermount3; see the Linux build README.
+  for fuse_library in "/usr/lib/$arch-linux-gnu/libfuse3.so.3"*; do
+    if [ -e "$fuse_library" ]; then
+      cp -P "$fuse_library" ./usr/lib/
+    fi
+  done
+  if command -v fusermount3 >/dev/null 2>&1; then
+    cp -P "$(command -v fusermount3)" ./usr/bin/fusermount3
+  fi
+
   # Move sync exclude to right location
   cp /src/sync-exclude-linux.lst ./usr/bin/sync-exclude.lst
   cp /src/sync-folder-rules-linux.csv ./usr/bin/sync-folder-rules.csv
+  cp /src/litesync-exclude-linux.lst ./usr/bin/litesync-exclude.lst
   rm -rf ./etc
 
   cp ./usr/share/icons/hicolor/512x512/apps/kdrive-win.png . # Workaround for linuxeployqt bug, FIXME

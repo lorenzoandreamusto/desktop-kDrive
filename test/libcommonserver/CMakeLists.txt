@@ -28,7 +28,7 @@ set(testcommonserver_SRCS
 
 if(APPLE)
     list(APPEND testcommonserver_SRCS ../test_utility/testhelpers_mac.cpp)
-elseif(UNIX)
+elseif(UNIX AND NOT APPLE)
     list(APPEND testcommonserver_SRCS ../test_utility/testhelpers_linux.cpp)
     # The placeholder metadata and the node map are shared with the Linux VFS plugin. They do not
     # depend on libfuse3, so they can be tested without a mount or root privileges.
