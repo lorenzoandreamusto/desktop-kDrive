@@ -110,6 +110,10 @@ class Vfs : public QObject {
         void setExclusionAppListCallback(const std::function<void(QString &)> &exclusionAppList) {
             _exclusionAppList = exclusionAppList;
         }
+        void setHydrationRequestCallback(
+                const std::function<ExitInfo(SyncDbId, const SyncPath &, const SyncPath &, const SyncPath &)> &hydrationRequest) {
+            _hydrationRequest = hydrationRequest;
+        }
 
         virtual VirtualFileMode mode() const = 0;
 
@@ -331,6 +335,10 @@ class Vfs : public QObject {
         virtual void hydrate(const SyncPath &path) = 0;
         virtual void cancelHydrate(const SyncPath &, const ExitInfo &exitInfo = ExitCode::Unknown) = 0;
 
+        /// Hydrate every dehydrated placeholder below the sync folder. Used before disabling Lite Sync so that no
+        /// content is lost when the virtual files are cleaned up.
+        virtual bool hydrateAllPlaceholders() { return true; }
+
     signals:
         /// Emitted when a user-initiated hydration starts
         void beginHydrating();
@@ -348,6 +356,7 @@ class Vfs : public QObject {
         std::function<void(SyncDbId, const SyncPath &, bool &)> _syncFileSyncing;
         std::function<void(SyncDbId, const SyncPath &, bool)> _setSyncFileSyncing;
         std::function<void(QString &)> _exclusionAppList;
+        std::function<ExitInfo(SyncDbId, const SyncPath &, const SyncPath &, const SyncPath &)> _hydrationRequest;
 
         bool extendedLog() { return _extendedLog; }
 

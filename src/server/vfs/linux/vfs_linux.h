@@ -23,7 +23,11 @@
 
 #include <QObject>
 
+#include <condition_variable>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
 
 namespace KDC {
 
@@ -71,6 +75,8 @@ class VfsLinux : public Vfs {
         bool isExcluded(const SyncPath &filePath) override;
         bool fileStatusChanged(const SyncPath &systemFileName, SyncFileStatus fileStatus) override;
         void clearFileAttributes(const SyncPath &path) override;
+        void convertDirContentToPlaceholder(const QString &filePath, bool isHydratedIn) override;
+        bool hydrateAllPlaceholders() override;
 
         void dehydrate(const SyncPath &path) override;
         void hydrate(const SyncPath &path) override;
@@ -84,7 +90,19 @@ class VfsLinux : public Vfs {
         void exclude(const SyncPath &path) override;
 
         [[nodiscard]] SyncPath absolutePath(const SyncPath &path) const;
+        ExitInfo hydrateAndWait(const SyncPath &path);
+        void completeHydration(const SyncPath &absolutePath, const ExitInfo &exitInfo);
 
+        struct HydrationState {
+                std::mutex mutex;
+                std::condition_variable cv;
+                bool started{false};
+                bool completed{false};
+                ExitInfo exitInfo{ExitCode::Ok};
+        };
+
+        std::mutex _hydrationMutex;
+        std::unordered_map<std::string, std::shared_ptr<HydrationState>> _hydrations;
         std::unique_ptr<FuseSession> _session;
         SyncPath _mountPoint;
 };

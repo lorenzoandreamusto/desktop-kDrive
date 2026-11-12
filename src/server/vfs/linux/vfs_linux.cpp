@@ -22,12 +22,15 @@
 #include "placeholdermetadata.h"
 
 #include "io/iohelper.h"
+#include "libcommon/utility/utility.h"
 #include "libcommonserver/log/log.h"
 #include "libcommonserver/utility/utility.h"
 
 #include <QStandardPaths>
 
+#include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -97,7 +100,8 @@ ExitInfo VfsLinux::startImpl(bool &installationDone, bool &activationDone, bool 
         }
     }
 
-    _session = std::make_unique<FuseSession>(_vfsSetupParams.localPath, _mountPoint, logger());
+    _session = std::make_unique<FuseSession>(_vfsSetupParams.localPath, _mountPoint, logger(),
+                                             [this](const SyncPath &path) { return hydrateAndWait(path); });
 
     std::string error;
     if (!_session->start(error)) {
@@ -116,6 +120,19 @@ ExitInfo VfsLinux::startImpl(bool &installationDone, bool &activationDone, bool 
 }
 
 void VfsLinux::stopImpl([[maybe_unused]] bool unregister) {
+    // Unblock FUSE open calls waiting for a hydration before stopping the loop thread.
+    {
+        const std::scoped_lock lock(_hydrationMutex);
+        for (auto &[_, state]: _hydrations) {
+            const std::scoped_lock stateLock(state->mutex);
+            state->completed = true;
+            state->exitInfo = {ExitCode::SystemError, ExitCause::OperationCanceled};
+        }
+        for (auto &[_, state]: _hydrations) {
+            state->cv.notify_all();
+        }
+    }
+
     if (_session) {
         _session->stop();
         _session.reset();
@@ -270,7 +287,17 @@ ExitInfo VfsLinux::updateFetchStatus(const SyncPath &tmpPath, const SyncPath &pa
         return exitInfo;
     }
 
-    return PlaceholderMetadata::setStatus(fullPath, false, true, 0);
+    PlaceholderInfo info;
+    if (const ExitInfo exitInfo = PlaceholderMetadata::read(fullPath, info); !exitInfo) {
+        return exitInfo;
+    }
+
+    int16_t progress = 0;
+    if (info.size > 0) {
+        progress = static_cast<int16_t>(std::clamp<int64_t>(received * 100 / info.size, 0, 100));
+    }
+
+    return PlaceholderMetadata::setStatus(fullPath, false, true, progress);
 }
 
 ExitInfo VfsLinux::updateFetchStatus(const SyncPath &path, const std::string &status) {
@@ -301,6 +328,8 @@ ExitInfo VfsLinux::forceStatus(const SyncPath &path, const VfsStatus &vfsStatus)
     if (!vfsStatus.isHydrated) {
         return PlaceholderMetadata::setPinState(fullPath, PinState::OnlineOnly);
     }
+
+    completeHydration(fullPath, ExitCode::Ok);
     return ExitCode::Ok;
 }
 
@@ -397,6 +426,60 @@ void VfsLinux::clearFileAttributes(const SyncPath &path) {
     }
 }
 
+void VfsLinux::convertDirContentToPlaceholder(const QString &filePath, const bool isHydratedIn) {
+    const SyncPath rootPath = QStr2Path(filePath);
+    std::error_code ec;
+    std::filesystem::recursive_directory_iterator iterator(rootPath, ec);
+    const std::filesystem::recursive_directory_iterator end;
+    if (ec) {
+        LOGW_WARN(logger(), L"Unable to iterate the sync folder: " << Utility::formatStdError(rootPath, ec));
+        return;
+    }
+
+    for (; iterator != end; iterator.increment(ec)) {
+        if (ec) {
+            LOGW_WARN(logger(), L"Unable to iterate the sync folder: " << Utility::formatStdError(rootPath, ec));
+            return;
+        }
+
+        PlaceholderInfo info;
+        if (const ExitInfo readExitInfo = PlaceholderMetadata::read(iterator->path(), info); readExitInfo && info.isPlaceholder) {
+            continue;
+        }
+
+        std::error_code typeError;
+        const bool isDirectory = iterator->is_directory(typeError);
+        if (typeError) {
+            continue;
+        }
+        const bool isRegularFile = !isDirectory && iterator->is_regular_file(typeError);
+        if (typeError || (!isDirectory && !isRegularFile)) {
+            continue;
+        }
+
+        struct stat fileStat {};
+        if (stat(iterator->path().c_str(), &fileStat) != 0) {
+            continue;
+        }
+
+        if (isRegularFile && !isHydratedIn && truncate(iterator->path().c_str(), 0) != 0) {
+            LOGW_WARN(logger(),
+                      L"Unable to truncate "
+                              << Utility::formatSyncPath(iterator->path()) << L": "
+                              << Utility::formatStdError(iterator->path(), std::error_code(errno, std::system_category())));
+            continue;
+        }
+
+        const int64_t size = isDirectory ? 0 : static_cast<int64_t>(fileStat.st_size);
+        if (const ExitInfo writeExitInfo =
+                    PlaceholderMetadata::write(iterator->path(), size, fileStat.st_mtime, "", isHydratedIn);
+            !writeExitInfo) {
+            LOGW_WARN(logger(), L"Unable to convert " << Utility::formatSyncPath(iterator->path()) << L" to a placeholder: "
+                                                      << writeExitInfo);
+        }
+    }
+}
+
 void VfsLinux::dehydrate(const SyncPath &path) {
     if (const ExitInfo exitInfo = dehydratePlaceholder(path); !exitInfo) {
         LOGW_WARN(logger(),
@@ -404,13 +487,135 @@ void VfsLinux::dehydrate(const SyncPath &path) {
     }
 }
 
-void VfsLinux::hydrate([[maybe_unused]] const SyncPath &path) {
-    // Hydration on open is implemented in the next phase.
-    LOGW_DEBUG(logger(), L"Hydration is not implemented yet: " << Utility::formatSyncPath(absolutePath(path)));
+bool VfsLinux::hydrateAllPlaceholders() {
+    std::error_code ec;
+    std::filesystem::recursive_directory_iterator iterator(_vfsSetupParams.localPath, ec);
+    const std::filesystem::recursive_directory_iterator end;
+    if (ec) {
+        LOGW_WARN(logger(), L"Unable to iterate the sync folder: " << Utility::formatStdError(_vfsSetupParams.localPath, ec));
+        return false;
+    }
+
+    for (; iterator != end; iterator.increment(ec)) {
+        if (ec) {
+            LOGW_WARN(logger(), L"Unable to iterate the sync folder: " << Utility::formatStdError(_vfsSetupParams.localPath, ec));
+            return false;
+        }
+
+        std::error_code typeError;
+        if (!iterator->is_regular_file(typeError) || typeError) {
+            continue;
+        }
+
+        PlaceholderInfo info;
+        if (const ExitInfo exitInfo = PlaceholderMetadata::read(iterator->path(), info); !exitInfo) {
+            return false;
+        }
+        if (!info.isPlaceholder || info.isHydrated) {
+            continue;
+        }
+
+        if (const ExitInfo exitInfo = hydrateAndWait(iterator->path()); !exitInfo) {
+            LOGW_WARN(logger(), L"Unable to hydrate " << Utility::formatSyncPath(iterator->path()) << L": " << exitInfo);
+            return false;
+        }
+    }
+
+    return true;
 }
 
-void VfsLinux::cancelHydrate(const SyncPath &path, [[maybe_unused]] const ExitInfo &exitInfo) {
-    (void) PlaceholderMetadata::setStatus(absolutePath(path), false);
+ExitInfo VfsLinux::hydrateAndWait(const SyncPath &path) {
+    const SyncPath fullPath = absolutePath(path);
+
+    PlaceholderInfo info;
+    if (const ExitInfo exitInfo = PlaceholderMetadata::read(fullPath, info); !exitInfo) {
+        return exitInfo;
+    }
+    if (!info.isPlaceholder || info.isHydrated) {
+        return ExitCode::Ok;
+    }
+
+    const std::string key = fullPath.lexically_normal().native();
+    std::shared_ptr<HydrationState> state;
+    bool startRequest = false;
+    {
+        const std::scoped_lock lock(_hydrationMutex);
+        auto &entry = _hydrations[key];
+        if (!entry) {
+            entry = std::make_shared<HydrationState>();
+        }
+        state = entry;
+        if (!state->started) {
+            state->started = true;
+            startRequest = true;
+        }
+    }
+
+    if (startRequest) {
+        (void) PlaceholderMetadata::setStatus(fullPath, false, true, 0);
+
+        ExitInfo requestExitInfo{ExitCode::LogicError, ExitCause::Unknown};
+        if (_hydrationRequest) {
+            requestExitInfo =
+                    _hydrationRequest(_vfsSetupParams.syncDbId, CommonUtility::relativePath(_vfsSetupParams.localPath, fullPath),
+                                      fullPath, fullPath.parent_path());
+        }
+        if (!requestExitInfo) {
+            completeHydration(fullPath, requestExitInfo);
+        }
+    }
+
+    ExitInfo result;
+    {
+        std::unique_lock lock(state->mutex);
+        if (!state->cv.wait_for(lock, std::chrono::minutes(10), [&state] { return state->completed; })) {
+            state->completed = true;
+            state->exitInfo = {ExitCode::SystemError, ExitCause::Unknown};
+        }
+        result = state->exitInfo;
+    }
+
+    {
+        const std::scoped_lock lock(_hydrationMutex);
+        const auto it = _hydrations.find(key);
+        if (it != _hydrations.end() && it->second == state && state->completed) {
+            _hydrations.erase(it);
+        }
+    }
+
+    return result;
+}
+
+void VfsLinux::completeHydration(const SyncPath &absolutePath, const ExitInfo &exitInfo) {
+    const std::string key = absolutePath.lexically_normal().native();
+    std::shared_ptr<HydrationState> state;
+    {
+        const std::scoped_lock lock(_hydrationMutex);
+        const auto it = _hydrations.find(key);
+        if (it == _hydrations.end()) {
+            return;
+        }
+        state = it->second;
+    }
+
+    {
+        const std::scoped_lock lock(state->mutex);
+        state->completed = true;
+        state->exitInfo = exitInfo;
+    }
+    state->cv.notify_all();
+}
+
+void VfsLinux::hydrate(const SyncPath &path) {
+    if (const ExitInfo exitInfo = hydrateAndWait(path); !exitInfo) {
+        LOGW_WARN(logger(), L"Unable to hydrate " << Utility::formatSyncPath(absolutePath(path)) << L": " << exitInfo);
+    }
+}
+
+void VfsLinux::cancelHydrate(const SyncPath &path, const ExitInfo &exitInfo) {
+    const SyncPath fullPath = absolutePath(path);
+    (void) PlaceholderMetadata::setStatus(fullPath, false);
+    completeHydration(fullPath, exitInfo);
 }
 
 } // namespace KDC

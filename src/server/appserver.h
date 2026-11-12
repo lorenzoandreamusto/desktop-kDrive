@@ -393,6 +393,8 @@ class AppServer : public SharedTools::QtSingleApplication {
         void syncFileStatus(SyncDbId syncDbId, const KDC::SyncPath &path, KDC::SyncFileStatus &status);
         void syncFileSyncing(SyncDbId syncDbId, const KDC::SyncPath &path, bool &syncing);
         void setSyncFileSyncing(SyncDbId syncDbId, const KDC::SyncPath &path, bool syncing);
+        ExitInfo requestHydration(SyncDbId syncDbId, const SyncPath &relativePath, const SyncPath &absolutePath,
+                                  const SyncPath &parentFolderPath);
 #if defined(KD_MACOS)
         void exclusionAppList(QString &appList);
 #endif

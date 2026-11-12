@@ -22,7 +22,7 @@ Linux without committing the product to a specific UX.
 
 | Item | Value |
 |---|---|
-| Status | Phases 1 and 2 implemented; build and tests not yet verified in CI. |
+| Status | Phases 1–5 implemented; phase 6 implemented for the legacy Qt GUI only (the Linux v4 GUI is not on `develop`). Build and tests not yet verified in CI. |
 | Target platform | Linux desktop, Ubuntu 22.04/24.04 amd64 first, ARM later |
 | Base branch | `develop` (legacy Qt GUI) unless the QML GUI is in scope, then `protected/linux-v4` |
 | Delivery | Feature flagged, off by default |
@@ -189,11 +189,14 @@ xattrs: ext4, xfs and btrfs. The single place to express this is
 
 ### D5 — Hydration transport
 
-The FUSE handler must block on the read of a dehydrated file until content is available.
-For the POC the FUSE session runs in a dedicated thread inside the server process, and the
-handler enqueues a hydration request through the existing `Vfs` worker infrastructure
-(`_workerInfo[workerHydration]`, drained by `VfsWorker`). A separate helper process is a
-later optimisation, not a POC requirement; it would need an IPC channel
+The FUSE handler blocks on the read of a dehydrated file until content is available. For
+the POC the FUSE session runs in a dedicated thread inside the server process. `VfsLinux`
+exposes a hydration callback to the server, which forwards the request to
+`SyncPal::addDlDirectJob`; the existing direct-download job writes the content to the
+placeholder. `VfsLinux::forceStatus` (called by `finalizeDirectDownload`) signals the
+condition variable that unblocks the FUSE thread. A per-path state makes concurrent opens
+single-flight, and a 10-minute timeout prevents a wedged mount. A separate helper process
+is a later optimisation, not a POC requirement; it would need an IPC channel
 (`src/server/comm/pipecommserver.*` / `socketcommserver.*`) and is explicitly deferred.
 
 ### D6 — Feature flag
@@ -211,11 +214,12 @@ Exact parameter key is decided in phase 0 and recorded here when implemented.
 ### D7 — Deactivation is rehydration, not wipe
 
 On macOS/Windows disabling Lite Sync wipes virtual files. For the POC, disabling on Linux
-first unmounts the FUSE filesystem, then rehydrates remaining placeholders before
-returning to `VfsOff`. Losing the mount must never propagate remote deletions: the
-deactivation path reuses the ordering of `AppServer::setSupportsVirtualFiles`
-(`src/server/appserver.cpp:4475`) with an explicit unmount step before
-`wipeVirtualFiles()`.
+hydrates all remaining placeholders while the mount is still active, then stops the sync
+and unmounts. `VirtualFilesCleaner` keeps hydrated placeholders on disk and only clears
+their attributes, so no content is deleted. Losing the mount must never propagate remote
+deletions: the deactivation path adds an explicit `hydrateAllPlaceholders()` step before
+the existing `setSupportsVirtualFiles` stop/wipe sequence, and aborts the operation if any
+hydration fails.
 
 ---
 
@@ -326,7 +330,7 @@ paths are on `develop`.
 | `src/libsyncengine/propagation/executor/executorworker.cpp:713` | Linux branch of `convertToPlaceholder` | 2 |
 | `src/libsyncengine/update_detection/file_system_observer/localfilesystemobserverworker.cpp:399` | Handle `VirtualFileMode::Linux` | 2 |
 | `src/libsyncengine/jobs/network/kDrive_API/downloadjob.cpp:393` | No change needed: the `isNTFS` check only guards Windows junction creation, not sparse files | — |
-| `src/libsyncengine/syncpal/syncpal.cpp:757` | Replace the "notify extension" hook with a VFS hydration-complete callback | 3 |
+| `src/libsyncengine/syncpal/syncpal.cpp:757` | No direct change: `forceStatus` is already called by `finalizeDirectDownload` and now signals the Linux hydration waiter | — |
 | `src/server/comm/guijobs/utilitybestvfsavailablemodejob.cpp:72` | Update the log/message: compatible filesystems are not only NTFS/APFS | 1 |
 | `src/server/comm/guijobs/guijobfactory.cpp:145` | No change expected; verify the best-mode job is reachable on Linux | 1 |
 | `CMakeLists.txt:271` | Install `litesync-exclude-linux.lst` for Linux packages | 4 |
@@ -334,6 +338,11 @@ paths are on `develop`.
 | `infomaniak-build-tools/linux/build-release-appimage.sh` | Bundle `libfuse3.so` and `fusermount3` | 4 |
 | `infomaniak-build-tools/linux/build-release-via-podman.sh` | Install `libfuse3-dev`; document the missing `/dev/fuse` in containers | 4 |
 | `test/libcommonserver/CMakeLists.txt` | Add the Linux VFS helper sources and tests to the `elseif(UNIX)` branch | 2 |
+| `src/libcommonserver/vfs/vfs.h` | Hydration request callback and `hydrateAllPlaceholders()` default | 3/5 |
+| `src/server/appserver.cpp`, `src/server/appserver.h` | Hydration callback, deactivation pre-hydration | 3/5 |
+| `src/gui/drivepreferenceswidget.cpp` | Enable the Lite Sync confirmation on Linux | 6 |
+| `src/gui/localfolderdialog.cpp`, `src/gui/adddrivelocalfolderwidget.cpp` | Linux filesystem compatibility check in the sync creation flow | 6 |
+| `CMakeLists.txt` | Install `litesync-exclude-linux.lst` for Linux packages | 4 |
 | `test/libparms/CMakeLists.txt:65` | Copy the Linux exclusion list next to the macOS one | 4 |
 | `src/gui4/windows/.../Services/CommSharedEnums.cs` | Not required for the POC: the Linux value never reaches a Windows client | — |
 | `src/gui4/macOS/...` (`Synchro`, `SyncList`, mappers) | Not required for the POC: the Linux value never reaches a macOS client | — |
@@ -404,6 +413,8 @@ Acceptance criteria:
 
 ### Phase 3 — Hydration on open
 
+Status: implemented; validation against a real sync account is pending.
+
 Work:
 
 - Blocking `read` path, hydration queue, progress reporting, cancellation, single-flight per node.
@@ -419,6 +430,9 @@ Acceptance criteria:
 - [ ] Opening a large file (for example 1 GiB) does not read more file content from the remote beyond the requested range, or this limitation is documented if whole-file download is kept for the POC.
 
 ### Phase 4 — Edits, deletes, moves, exclusions
+
+Status: implemented. FUSE write/create/truncate/rename/unlink are handled by the session,
+the node map moves whole subtrees, and the Linux exclusion list is installed.
 
 Work:
 
@@ -437,6 +451,10 @@ Acceptance criteria:
 
 ### Phase 5 — Activation and deactivation
 
+Status: implemented. Enabling converts existing files to hydrated placeholders; disabling
+hydrates all placeholders before unmounting and cleaning attributes; stale mounts are
+detached at startup.
+
 Work:
 
 - `setSupportsVirtualFiles` Linux path: mount/unmount ordering, rehydration before wipe.
@@ -451,6 +469,10 @@ Acceptance criteria:
 - [ ] No remote deletions occur in any of the above scenarios (verified against the server trash and activity log).
 
 ### Phase 6 — GUI entry points
+
+Status: legacy Qt GUI implemented. The Linux v4 QML GUI lives on a different branch and is
+not part of this `develop` change; its toggles remain to be wired when that branch is
+merged.
 
 Work:
 
@@ -509,14 +531,17 @@ component tests only; the integration run is manual and recorded in the POC repo
   `infomaniak-build-tools/linux/Readme.md`).
 - The plugin is installed into `PLUGINDIR`
   (`${CMAKE_INSTALL_FULL_LIBDIR}/kdrive/plugins`) so `addLibraryPath` in
-  `src/server/appserver.cpp:424` finds it without changes.
+  `src/server/appserver.cpp:424` finds it without changes. The release pipeline keeps
+  `BUILD_LINUX_VFS=OFF`; packaging the plugin and `libfuse3.so` remains a POC packaging
+  step because the AppImage builder would also need the matching `fusermount3` helper and
+  its setuid/AppImage constraints.
 - Packaging must remain functional when the plugin is absent or `/dev/fuse` is missing:
   the client starts, Lite Sync reports `Off`, sync continues.
 
 ### Local build and test script
 
-`infomaniak-build-tools/linux/build-and-test-linux-vfs.sh` reproduces the phase 1 and
-phase 2 validation locally on Ubuntu 22.04/24.04:
+`infomaniak-build-tools/linux/build-and-test-linux-vfs.sh` reproduces the phase 1–5
+validation locally on Ubuntu 22.04/24.04:
 
 ```bash
 ./infomaniak-build-tools/linux/build-and-test-linux-vfs.sh

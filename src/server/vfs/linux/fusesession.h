@@ -25,6 +25,7 @@
 
 #include <atomic>
 #include <ctime>
+#include <functional>
 #include <optional>
 #include <string>
 #include <thread>
@@ -45,7 +46,9 @@ namespace KDC {
 /// empty file. Hydration on open is implemented by the next phase.
 class FuseSession {
     public:
-        FuseSession(SyncPath sourceRoot, SyncPath mountPoint, log4cplus::Logger logger);
+        using HydrationHandler = std::function<ExitInfo(const SyncPath &)>;
+
+        FuseSession(SyncPath sourceRoot, SyncPath mountPoint, log4cplus::Logger logger, HydrationHandler hydrationHandler);
         ~FuseSession();
 
         FuseSession(const FuseSession &) = delete;
@@ -59,6 +62,7 @@ class FuseSession {
     private:
         static FuseSession *self();
         static struct fuse_operations buildOperations();
+        void cleanupStaleMountPoint();
 
         static int cbGetattr(const char *path, struct stat *statBuffer, struct fuse_file_info *fileInfo);
         static int cbReaddir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset,
@@ -121,6 +125,7 @@ class FuseSession {
         SyncPath _mountPoint;
         log4cplus::Logger _logger;
         NodeMap _nodeMap;
+        HydrationHandler _hydrationHandler;
 
         struct fuse *_fuse{nullptr};
         std::thread _loopThread;

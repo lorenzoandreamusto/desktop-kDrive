@@ -2981,6 +2981,17 @@ void AppServer::setSyncFileSyncing(const SyncDbId syncDbId, const SyncPath &path
     }
 }
 
+ExitInfo AppServer::requestHydration(const SyncDbId syncDbId, const SyncPath &relativePath, const SyncPath &absolutePath,
+                                     const SyncPath &parentFolderPath) {
+    const std::scoped_lock lock(syncPalMapMutex);
+    const auto syncPalMapIt = syncPalMap.find(syncDbId);
+    if (syncPalMapIt == syncPalMap.end() || !syncPalMapIt->second) {
+        return {ExitCode::SyncPaused};
+    }
+
+    return syncPalMapIt->second->addDlDirectJob(relativePath, absolutePath, parentFolderPath);
+}
+
 #if defined(KD_MACOS)
 void AppServer::exclusionAppList(QString &appList) {
     for (bool def: {false, true}) {
@@ -4403,6 +4414,7 @@ ExitInfo AppServer::createAndStartVfs(const Sync &sync) noexcept {
         vfsMapIt->second->setSyncFileStatusCallback(std::bind_front(&AppServer::syncFileStatus, this));
         vfsMapIt->second->setSyncFileSyncingCallback(std::bind_front(&AppServer::syncFileSyncing, this));
         vfsMapIt->second->setSetSyncFileSyncingCallback(std::bind_front(&AppServer::setSyncFileSyncing, this));
+        vfsMapIt->second->setHydrationRequestCallback(std::bind_front(&AppServer::requestHydration, this));
 #if defined(KD_MACOS)
         vfsMapIt->second->setExclusionAppListCallback(std::bind_front(&AppServer::exclusionAppList, this));
 #endif

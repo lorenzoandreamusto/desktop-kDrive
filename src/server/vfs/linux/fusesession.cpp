@@ -19,6 +19,7 @@
 #include "fusesession.h"
 
 #include "io/iohelper.h"
+#include "libcommonserver/utility/utility.h"
 #include "log/log.h"
 #include "placeholdermetadata.h"
 
@@ -30,20 +31,40 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <linux/magic.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/vfs.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 
 namespace KDC {
 
-FuseSession::FuseSession(SyncPath sourceRoot, SyncPath mountPoint, log4cplus::Logger logger) :
+FuseSession::FuseSession(SyncPath sourceRoot, SyncPath mountPoint, log4cplus::Logger logger, HydrationHandler hydrationHandler) :
     _sourceRoot(std::move(sourceRoot)),
     _mountPoint(std::move(mountPoint)),
-    _logger(logger) {}
+    _logger(logger),
+    _hydrationHandler(std::move(hydrationHandler)) {}
 
 FuseSession::~FuseSession() {
     stop();
+}
+
+void FuseSession::cleanupStaleMountPoint() {
+    struct statfs statfsBuffer {};
+    if (statfs(_mountPoint.c_str(), &statfsBuffer) != 0) {
+        return;
+    }
+    if (statfsBuffer.f_type != FUSE_SUPER_MAGIC) {
+        return;
+    }
+
+    // A previous server instance was killed while the filesystem was mounted: detach it before mounting again.
+    LOG_WARN(_logger, "Removing a stale FUSE mount at " << _mountPoint.string());
+    if (umount2(_mountPoint.c_str(), MNT_DETACH) != 0) {
+        LOG_WARN(_logger, "Unable to remove the stale FUSE mount: " << std::strerror(errno));
+    }
 }
 
 FuseSession *FuseSession::self() {
@@ -88,6 +109,8 @@ bool FuseSession::start(std::string &error) {
         return true;
     }
 
+    cleanupStaleMountPoint();
+
     std::error_code ec;
     std::filesystem::create_directories(_mountPoint, ec);
     if (ec) {
@@ -128,7 +151,9 @@ bool FuseSession::start(std::string &error) {
 
     try {
         _loopThread = std::thread([this]() {
-            const int result = fuse_loop(_fuse);
+            // Multi-threaded loop: a blocking open on a placeholder must not freeze the whole mount, and
+            // concurrent opens of the same node need to reach the single-flight hydration state.
+            const int result = fuse_loop_mt(_fuse, 0);
             if (result != 0 && !_stopping.load()) {
                 LOG_ERROR(_logger, "FUSE loop stopped with error " << result);
             }
@@ -375,8 +400,20 @@ int FuseSession::doOpen(const char *path, struct fuse_file_info *fileInfo) {
     bool isDehydrated = false;
     IoError ioError = IoError::Success;
     if (IoHelper::checkIfFileIsDehydrated(*realPath, isDehydrated, ioError) && isDehydrated) {
-        // Hydration on open is implemented in the next phase.
-        return -EIO;
+        if (!_hydrationHandler) {
+            return -EIO;
+        }
+
+        const ExitInfo hydrationExitInfo = _hydrationHandler(*realPath);
+        if (!hydrationExitInfo) {
+            LOGW_WARN(_logger, L"Unable to hydrate " << Utility::formatSyncPath(*realPath) << L": " << hydrationExitInfo);
+            return -EIO;
+        }
+
+        // The file is expected to be hydrated now; never expose a partially hydrated file to the caller.
+        if (!IoHelper::checkIfFileIsDehydrated(*realPath, isDehydrated, ioError) || isDehydrated) {
+            return -EIO;
+        }
     }
 
     const int fileDescriptor = open(realPath->c_str(), fileInfo->flags);
@@ -409,7 +446,11 @@ int FuseSession::doWrite(const char *path, const char *buffer, size_t size, off_
 
     if (const auto realPath = resolve(path)) {
         (void) PlaceholderMetadata::setStatus(*realPath, true);
-        (void) PlaceholderMetadata::setSize(*realPath, static_cast<int64_t>(offset) + bytesWritten);
+
+        struct stat fileStat {};
+        if (fstat(static_cast<int>(fileInfo->fh), &fileStat) == 0) {
+            (void) PlaceholderMetadata::setSize(*realPath, static_cast<int64_t>(fileStat.st_size));
+        }
     }
 
     return static_cast<int>(bytesWritten);
@@ -484,11 +525,16 @@ int FuseSession::doRename(const char *from, const char *to) {
     if (!fromPath || !toPath) {
         return -ENOENT;
     }
+    if (*fromPath == *toPath) {
+        return 0;
+    }
 
     if (rename(fromPath->c_str(), toPath->c_str()) != 0) {
         return -errno;
     }
 
+    // POSIX rename replaces an existing destination: drop its previous inode assignment first.
+    _nodeMap.erase(*toPath);
     _nodeMap.rename(*fromPath, *toPath);
     return 0;
 }
