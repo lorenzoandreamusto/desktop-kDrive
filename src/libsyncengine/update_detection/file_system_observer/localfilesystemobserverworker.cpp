@@ -393,11 +393,11 @@ ExitInfo LocalFileSystemObserverWorker::processDetectedChanges(const std::list<s
             continue;
         }
 
-#if defined(KD_MACOS)
+#if defined(KD_MACOS) || defined(KD_LINUX)
         if (fileStat.modificationTime > _liveSnapshot.lastModified(nodeId)) {
             // This is an edit operation
-            if (_syncPal->vfsMode() == VirtualFileMode::Mac) {
-                // Exclude spurious operations (for example setIcon)
+            if (_syncPal->vfsMode() == VirtualFileMode::Mac || _syncPal->vfsMode() == VirtualFileMode::Linux) {
+                // Exclude spurious operations (for example setIcon on macOS).
                 bool valid = true;
                 if (const auto exitCode = isEditValid(nodeId, absolutePath, fileStat.modificationTime, fileStat.size, valid);
                     exitCode != ExitCode::Ok) {

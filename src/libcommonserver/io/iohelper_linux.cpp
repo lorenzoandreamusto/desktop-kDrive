@@ -44,11 +44,107 @@
 
 namespace KDC {
 
-bool IoHelper::checkIfFileIsDehydrated(const SyncPath &itemPath, bool &isDehydrated, IoError &ioError) noexcept {
-    (void) (itemPath);
+namespace {
+inline bool _isXAttrValueExpectedError(IoError error) {
+    return (error == IoError::NoSuchFileOrDirectory) || (error == IoError::AttrNotFound) || (error == IoError::AccessDenied);
+}
+} // namespace
 
+bool IoHelper::getXAttrValue(const SyncPath &path, const std::string_view &attrName, std::string &value,
+                             IoError &ioError) noexcept {
+    value = "";
+    ioError = IoError::Unknown;
+
+    const std::string attributeName(attrName);
+
+    for (;;) {
+        const ssize_t bufferLength = lgetxattr(path.native().c_str(), attributeName.c_str(), nullptr, 0);
+        if (bufferLength < 0) {
+            ioError = posixError2ioError(errno);
+            return _isXAttrValueExpectedError(ioError);
+        }
+
+        value.resize(static_cast<size_t>(bufferLength));
+        if (bufferLength == 0) {
+            ioError = IoError::Success;
+            return true;
+        }
+
+        if (lgetxattr(path.native().c_str(), attributeName.c_str(), value.data(), value.size()) != bufferLength) {
+            ioError = posixError2ioError(errno);
+            if (ioError == IoError::ResultOutOfRange) {
+                // The attribute length changed between the two calls, retry.
+                continue;
+            }
+            return _isXAttrValueExpectedError(ioError);
+        }
+
+        ioError = IoError::Success;
+        return true;
+    }
+}
+
+bool IoHelper::setXAttrValue(const SyncPath &path, const std::string_view &attrName, const std::string_view &value,
+                             IoError &ioError) noexcept {
+    ioError = IoError::Unknown;
+
+    const std::string attributeName(attrName);
+    if (lsetxattr(path.native().c_str(), attributeName.c_str(), value.data(), value.size(), 0) < 0) {
+        ioError = posixError2ioError(errno);
+        return _isXAttrValueExpectedError(ioError);
+    }
+
+    ioError = IoError::Success;
+    return true;
+}
+
+bool IoHelper::removeXAttrs(const SyncPath &path, const std::vector<std::string_view> &attrNames, IoError &ioError) noexcept {
+    ioError = IoError::Success;
+
+    for (const auto &attrName: attrNames) {
+        const std::string attributeName(attrName);
+        if (lremovexattr(path.native().c_str(), attributeName.c_str()) < 0) {
+            if (const int error = errno; error == ENODATA) {
+                // The attribute is already absent.
+                continue;
+            }
+            ioError = posixError2ioError(errno);
+            return _isXAttrValueExpectedError(ioError);
+        }
+    }
+
+    return true;
+}
+
+bool IoHelper::removeLiteSyncXAttrs(const SyncPath &path, IoError &ioError) noexcept {
+    static const std::vector<std::string_view> liteSyncAttrNames = {
+            litesync_attrs::status, litesync_attrs::pinState, litesync_attrs::size,
+            litesync_attrs::modificationTime, litesync_attrs::nodeId};
+    return removeXAttrs(path, liteSyncAttrNames, ioError);
+}
+
+bool IoHelper::checkIfFileIsDehydrated(const SyncPath &itemPath, bool &isDehydrated, IoError &ioError) noexcept {
     isDehydrated = false;
     ioError = IoError::Success;
+
+    std::string value;
+    const bool result = IoHelper::getXAttrValue(itemPath, litesync_attrs::status, value, ioError);
+    if (!result) {
+        LOGW_WARN(logger(), L"Error in getXAttrValue: " << Utility::formatIoError(itemPath, ioError));
+        return false;
+    }
+
+    if (ioError == IoError::NoSuchFileOrDirectory) {
+        LOGW_WARN(logger(), L"Item does not exist anymore: " << Utility::formatSyncPath(itemPath));
+        return true;
+    } else if (ioError == IoError::AccessDenied) {
+        LOGW_WARN(logger(), L"Item misses search permission: " << Utility::formatSyncPath(itemPath));
+        return true;
+    }
+
+    assert(ioError == IoError::Success || ioError == IoError::AttrNotFound);
+
+    if (!value.empty()) isDehydrated = (value != litesync_attrs::statusOffline);
 
     return true;
 }

@@ -740,6 +740,9 @@ ExitInfo ExecutorWorker::convertToPlaceholder(const SyncPath &relativeLocalPath,
     }
 
     syncItem.setLocalNodeId(std::to_string(fileStat.inode));
+#elif defined(KD_LINUX)
+    // VfsLinux::convertToPlaceholder needs only SyncFileItem::_dehydrated
+    syncItem.setDehydrated(!hydrated);
 #endif
 
     if (ExitInfo exitInfo = _syncPal->vfs()->convertToPlaceholder(absoluteLocalFilePath, syncItem); !exitInfo) {

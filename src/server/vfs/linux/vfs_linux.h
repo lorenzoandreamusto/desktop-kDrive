@@ -23,23 +23,29 @@
 
 #include <QObject>
 
+#include <memory>
+
 namespace KDC {
 
-/// Linux VFS skeleton.
+class FuseSession;
+
+/// Linux VFS plugin backed by a FUSE session.
 ///
-/// This plugin only advertises the Linux VFS mode and rejects activation: the FUSE
-/// implementation lands in the next POC phase. Keeping the plugin loadable lets the
-/// plugin discovery, mode selection and persistence paths be validated independently.
+/// Placeholders are regular sparse files carrying user.* extended attributes. The FUSE
+/// mount presents them with their logical size and blocks reads until hydration is
+/// available; hydration on open is implemented in the next phase.
 class VfsLinux : public Vfs {
         Q_OBJECT
         Q_INTERFACES(KDC::Vfs)
 
     public:
         explicit VfsLinux(const VfsSetupParams &vfsSetupParams, QObject *parent = nullptr);
+        ~VfsLinux() override;
 
         VirtualFileMode mode() const override { return VirtualFileMode::Linux; }
 
         bool showPinStateActions() const override { return false; }
+        bool isRegistered() const override;
 
         ExitInfo updateMetadata(const SyncPath &filePath, time_t creationTime, time_t modtime, int64_t size,
                                 const NodeId &fileId) override;
@@ -76,6 +82,11 @@ class VfsLinux : public Vfs {
 
     private:
         void exclude(const SyncPath &path) override;
+
+        [[nodiscard]] SyncPath absolutePath(const SyncPath &path) const;
+
+        std::unique_ptr<FuseSession> _session;
+        SyncPath _mountPoint;
 };
 
 class LinuxVfsPluginFactory : public QObject, public DefaultPluginFactory<VfsLinux> {

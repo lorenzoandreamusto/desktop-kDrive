@@ -1,9 +1,16 @@
-find_package(Qt6)
+find_package(Qt6 REQUIRED Core)
+find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
+
+pkg_check_modules(FUSE3 REQUIRED IMPORTED_TARGET fuse3)
 
 # Target
 # The plugin name must match pluginFileName("vfs", "linux") in libcommonserver/vfs/plugin.cpp.
 add_library("${APPLICATION_EXECUTABLE}_vfs_linux" SHARED
     vfs_linux.h vfs_linux.cpp
+    fusesession.h fusesession.cpp
+    nodemap.h nodemap.cpp
+    placeholdermetadata.h placeholdermetadata.cpp
 )
 
 set_target_properties("${APPLICATION_EXECUTABLE}_vfs_linux" PROPERTIES
@@ -17,6 +24,8 @@ set_target_properties("${APPLICATION_EXECUTABLE}_vfs_linux" PROPERTIES
 target_link_libraries("${APPLICATION_EXECUTABLE}_vfs_linux"
     ${libcommonserver_NAME}
     Qt6::Core
+    PkgConfig::FUSE3
+    Threads::Threads
 )
 
 # Install

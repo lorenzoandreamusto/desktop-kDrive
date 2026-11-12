@@ -22,7 +22,7 @@ Linux without committing the product to a specific UX.
 
 | Item | Value |
 |---|---|
-| Status | Phase 1 implemented; build and tests not yet verified in CI. Phase 2 in progress. |
+| Status | Phases 1 and 2 implemented; build and tests not yet verified in CI. |
 | Target platform | Linux desktop, Ubuntu 22.04/24.04 amd64 first, ARM later |
 | Base branch | `develop` (legacy Qt GUI) unless the QML GUI is in scope, then `protected/linux-v4` |
 | Delivery | Feature flagged, off by default |
@@ -115,8 +115,9 @@ Three places remain platform-specific and must be extended for Linux:
 
 - Placeholder attributes are macOS-only: `namespace litesync_attrs` is compiled under
   `KD_MACOS` — `src/libcommonserver/io/iohelper.h:34`; `IoHelper::statusXAttr` at `:477`.
-- `IoHelper::checkIfFileIsDehydrated` on Linux is a stub that always reports
-  "not dehydrated" — `src/libcommonserver/io/iohelper_linux.cpp:47`.
+- `IoHelper::checkIfFileIsDehydrated` reads the `user.kDrive.status` extended attribute on
+  Linux (`src/libcommonserver/io/iohelper_linux.cpp`), like the macOS implementation reads
+  its own attribute.
 - `CommonUtility::isLiteSyncCompatible` returns `false` on Linux —
   `src/libcommon/utility/utility.cpp:363`.
 
@@ -138,7 +139,7 @@ Three places remain platform-specific and must be extended for Linux:
 | Plugin availability check wrapped in `#if !defined(KD_LINUX)` | `src/libcommonserver/vfs/vfs.cpp:274` |
 | Filesystem compatibility returns `false` in the `#else` branch | `src/libcommon/utility/utility.cpp:363` |
 | Sync mode forced to `Off` | `src/server/requests/serverrequests.cpp:843` |
-| Dehydration detection stub | `src/libcommonserver/io/iohelper_linux.cpp:47` |
+| Dehydration detection | Implemented through the Linux `user.kDrive.status` attribute (`src/libcommonserver/io/iohelper_linux.cpp`) |
 | Linux v4 GUI forces `request.liteSync = false` | `src/gui4/linux/app/onboarding/onboardingsynccreationcoordinator.cpp:163`, `src/gui4/linux/app/settings/advancedsynccreationcontroller.cpp:263`, `src/gui4/linux/app/settings/settingssyncactivationcontroller.cpp:342` (branch `protected/linux-v4`) |
 
 ---
@@ -168,9 +169,10 @@ extension connection and `VfsWin` owns the cfapi DLL.
 ### D3 — Placeholder metadata storage
 
 Decision for the POC: store status and pin state as extended attributes in the `user.*`
-namespace on the placeholder inode (for example `user.kDrive.status`,
-`user.kDrive.pinstate`), mirroring the macOS value vocabulary
-(`O` online, `F` offline, `H<progress>` hydrating, `U`/`P`/`E` pin states).
+namespace on the placeholder inode, mirroring the macOS value vocabulary
+(`O` online, `F` offline, `H<progress>` hydrating, `U`/`P`/`E` pin states). Phase 2 also
+stores `user.kDrive.size`, `user.kDrive.mtime` and `user.kDrive.nodeid` so the FUSE layer
+can report the logical size and the sync engine can recover metadata after a restart.
 
 Rationale: keeps `status()`, `isDehydratedPlaceholder()` and `setPinState()` cheap and
 survives server restarts. If FUSE inode identity makes xattrs unreliable, the fallback is
@@ -240,7 +242,7 @@ deactivation path reuses the ordering of `AppServer::setSupportsVirtualFiles`
 |                                                                              |
 |  SyncPal / ExecutorWorker / SyncLocalDeleteJob (unchanged, use Vfs)          |
 +------------------------------------------------------------------------------+
-                 |  /run/user/<uid>/kdrive/<syncDbId> (mount point)
+                 |  /run/user/<uid>/kDrive/vfs-<syncDbId> (mount point)
                  v
         user applications see placeholders and transparent hydration
 ```
@@ -288,16 +290,14 @@ The plugin must implement every pure virtual of `KDC::Vfs`. POC-critical semanti
 | `docs/design/litesync-linux-poc.md` | This document |
 | `src/server/vfs/linux/CMakeLists.txt` | Plugin target, includes, link, install into `PLUGINDIR` |
 | `src/server/vfs/linux/vfs_linux.h` | `VfsLinux` class and plugin factory declarations |
-| `src/server/vfs/linux/vfs_linux.cpp` | `KDC::Vfs` implementation, hydration queue integration |
+| `src/server/vfs/linux/vfs_linux.cpp` | `KDC::Vfs` implementation: mount lifecycle, placeholder creation, xattr metadata |
 | `src/server/vfs/linux/fusesession.h` | FUSE session wrapper: mount, unmount, loop lifecycle |
 | `src/server/vfs/linux/fusesession.cpp` | FUSE callbacks: `getattr`, `readdir`, `open`, `read`, `write`, `create`, `truncate`, `rename`, `unlink`, `setxattr`, `getxattr` |
 | `src/server/vfs/linux/placeholdermetadata.h` | Attribute names and value helpers (`user.kDrive.status`, `user.kDrive.pinstate`) |
 | `src/server/vfs/linux/placeholdermetadata.cpp` | Read/write/remove attributes with `IoHelper` primitives |
 | `src/server/vfs/linux/nodemap.h` | Path-to-node mapping and inode allocation for the FUSE tree |
-| `test/server/vfs/linux/testvfslinux.h` | Unit tests for metadata, pin state and mode reporting |
-| `test/server/vfs/linux/testvfslinux.cpp` | Unit tests, no real mount required |
-| `test/server/vfs/linux/testfusepath.h` | Unit tests for path mapping and node resolution |
-| `test/server/vfs/linux/testfusepath.cpp` | Unit tests, no privileged operation |
+| `test/libcommonserver/vfs/testlinuxvfs.h` | Unit tests for placeholder metadata, pin state and the node map |
+| `test/libcommonserver/vfs/testlinuxvfs.cpp` | Unit tests, no real mount or root privileges required |
 | `litesync-exclude-linux.lst` | Placeholder exclusion list for Linux indexers (empty/comment-only in the POC) |
 | `infomaniak-build-tools/linux/build-and-test-linux-vfs.sh` | Installs the Linux dependencies, builds with `BUILD_LINUX_VFS=ON` and runs the unit tests |
 
@@ -325,15 +325,15 @@ paths are on `develop`.
 | `src/libcommonserver/io/iohelper.h:34` | Expose placeholder attribute constants on Linux | 2 |
 | `src/libsyncengine/propagation/executor/executorworker.cpp:713` | Linux branch of `convertToPlaceholder` | 2 |
 | `src/libsyncengine/update_detection/file_system_observer/localfilesystemobserverworker.cpp:399` | Handle `VirtualFileMode::Linux` | 2 |
-| `src/libsyncengine/jobs/network/kDrive_API/downloadjob.cpp:393` | Generalise the sparse-file check | 2 |
+| `src/libsyncengine/jobs/network/kDrive_API/downloadjob.cpp:393` | No change needed: the `isNTFS` check only guards Windows junction creation, not sparse files | — |
 | `src/libsyncengine/syncpal/syncpal.cpp:757` | Replace the "notify extension" hook with a VFS hydration-complete callback | 3 |
 | `src/server/comm/guijobs/utilitybestvfsavailablemodejob.cpp:72` | Update the log/message: compatible filesystems are not only NTFS/APFS | 1 |
 | `src/server/comm/guijobs/guijobfactory.cpp:145` | No change expected; verify the best-mode job is reachable on Linux | 1 |
 | `CMakeLists.txt:271` | Install `litesync-exclude-linux.lst` for Linux packages | 4 |
-| `conanfile.py` (`requirements()`) | Optional `libfuse3` dependency when `BUILD_LINUX_VFS` is on | 1 |
+| `conanfile.py` (`requirements()`) | No change: `libfuse3` comes from the system package and is discovered with `pkg-config` | 1 |
 | `infomaniak-build-tools/linux/build-release-appimage.sh` | Bundle `libfuse3.so` and `fusermount3` | 4 |
 | `infomaniak-build-tools/linux/build-release-via-podman.sh` | Install `libfuse3-dev`; document the missing `/dev/fuse` in containers | 4 |
-| `test/server/CMakeLists.txt:235` | Add `vfs/linux` test sources to the existing `elseif(UNIX)` branch | 2 |
+| `test/libcommonserver/CMakeLists.txt` | Add the Linux VFS helper sources and tests to the `elseif(UNIX)` branch | 2 |
 | `test/libparms/CMakeLists.txt:65` | Copy the Linux exclusion list next to the macOS one | 4 |
 | `src/gui4/windows/.../Services/CommSharedEnums.cs` | Not required for the POC: the Linux value never reaches a Windows client | — |
 | `src/gui4/macOS/...` (`Synchro`, `SyncList`, mappers) | Not required for the POC: the Linux value never reaches a macOS client | — |
@@ -384,6 +384,8 @@ Acceptance criteria:
 - [ ] Unit tests for names, availability and filesystem policy pass; `clang-format` produces no diff.
 
 ### Phase 2 — Mount and placeholders
+
+Status: implemented; validation on a real `/dev/fuse` mount is pending.
 
 Work:
 
@@ -471,7 +473,7 @@ Acceptance criteria:
 | Level | Scope | Where |
 |---|---|---|
 | Unit | Mode strings, filesystem policy, metadata helpers, node map, pin state | `test/libcommon`, `test/libcommonserver`, `test/server/vfs/linux` |
-| Component | `VfsLinux` with FUSE syscalls mocked: placeholder creation, status, hydration queue | `test/server/vfs/linux` |
+| Component | `VfsLinux` helpers without a mount: placeholder creation, status, metadata, node map | `test/libcommonserver/vfs` |
 | Sync engine | Existing `mockvfs` scenarios parameterised with `VirtualFileMode::Linux` | `test/libsyncengine` |
 | Integration (manual, POC gate) | Real mount on ext4, full scenario matrix on Ubuntu 22.04 and 24.04 | Script documented in this file's appendix |
 | Packaging | Plugin present in the AppImage, loads, fails gracefully without `/dev/fuse` | `infomaniak-build-tools/linux` |
@@ -498,8 +500,10 @@ component tests only; the integration run is manual and recorded in the POC repo
 
 - `BUILD_LINUX_VFS` defaults to `OFF`; the release pipeline keeps producing the current
   binary until the POC is accepted.
-- `libfuse3` is the only new native dependency. It is declared in `conanfile.py` when the
-  option is on, and `libfuse3-dev` is added to the Linux build scripts.
+- `libfuse3` is the only new native dependency. It is installed as the `libfuse3-dev` system
+  package (there is no Conan recipe for it in this project) and discovered with
+  `pkg-config` in `src/server/vfs/linux/CMakeLists.txt`; `build-and-test-linux-vfs.sh`
+  installs it.
 - The AppImage must contain `libfuse3.so*` and `fusermount3`; the setuid helper must stay
   usable inside the AppImage (document the AppImage/FUSE constraint in
   `infomaniak-build-tools/linux/Readme.md`).

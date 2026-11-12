@@ -30,13 +30,26 @@
 
 namespace KDC {
 
-#if defined(KD_MACOS)
+#if defined(KD_MACOS) || defined(KD_LINUX)
 namespace litesync_attrs {
 
+#if defined(KD_MACOS)
 //! Item status
 static constexpr std::string_view status("com.infomaniak.drive.desktopclient.litesync.status");
 //! Request
 static constexpr std::string_view pinState("com.infomaniak.drive.desktopclient.litesync.pinstate");
+#else
+//! Item status
+static constexpr std::string_view status("user.kDrive.status");
+//! Request
+static constexpr std::string_view pinState("user.kDrive.pinstate");
+//! Logical size of a dehydrated placeholder; the file itself is sparse.
+static constexpr std::string_view size("user.kDrive.size");
+//! Modification time advertised by the placeholder, in seconds since the epoch.
+static constexpr std::string_view modificationTime("user.kDrive.mtime");
+//! Remote node id attached to the placeholder.
+static constexpr std::string_view nodeId("user.kDrive.nodeid");
+#endif
 
 //! The status of a dehydrated item
 static constexpr std::string_view statusOnline("O");
@@ -427,7 +440,7 @@ struct IoHelper {
         */
         static bool copyFileOrDirectory(const SyncPath &sourcePath, const SyncPath &destinationPath, IoError &ioError) noexcept;
 
-#if defined(KD_MACOS)
+#if defined(KD_MACOS) || defined(KD_LINUX)
         // From `man xattr`:
         // Extended attributes are arbitrary metadata stored with a file, but separate from the
         // filesystem attributes (such as modification time or file size). The metadata is often a null-terminated UTF-8 string,

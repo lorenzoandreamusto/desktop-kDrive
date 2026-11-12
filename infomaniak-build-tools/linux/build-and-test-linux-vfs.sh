@@ -161,6 +161,7 @@ install_system_dependencies() {
         clang
         libcppunit-dev
         libmount-dev
+        libfuse3-dev
         libglib2.0-dev
         libsecret-1-dev
         libc-ares-dev

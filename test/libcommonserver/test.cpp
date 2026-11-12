@@ -24,12 +24,20 @@
 #include "data/testserverparameters.h"
 #include "vfs/testvfsmode.h"
 
+#if defined(KD_LINUX)
+#include "vfs/testlinuxvfs.h"
+#endif
+
 namespace KDC {
 CPPUNIT_TEST_SUITE_REGISTRATION(TestUtility);
 CPPUNIT_TEST_SUITE_REGISTRATION(TestCertificateBlocklist);
 CPPUNIT_TEST_SUITE_REGISTRATION(TestDb);
 CPPUNIT_TEST_SUITE_REGISTRATION(TestServerParameters);
 CPPUNIT_TEST_SUITE_REGISTRATION(TestVfsMode);
+#if defined(KD_LINUX)
+CPPUNIT_TEST_SUITE_REGISTRATION(TestPlaceholderMetadata);
+CPPUNIT_TEST_SUITE_REGISTRATION(TestNodeMap);
+#endif
 } // namespace KDC
 
 int main(int, char **) {
