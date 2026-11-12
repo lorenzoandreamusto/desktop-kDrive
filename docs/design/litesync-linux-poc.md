@@ -22,7 +22,7 @@ Linux without committing the product to a specific UX.
 
 | Item | Value |
 |---|---|
-| Status | Phases 1–6 implemented (phase 6 for the legacy Qt GUI only; the Linux v4 GUI is not on `develop`). Build-system wiring is complete; standalone Linux VFS tests pass, while full CMake/unit tests still require Qt, Poco, log4cplus and libfuse3. |
+| Status | Phases 1–6 implemented (phase 6 for the legacy Qt GUI only; the Linux v4 GUI is not on `develop`). The standalone CMake harness configures, builds and passes CTest; the full root build stops at the missing Qt6 package. |
 | Target platform | Linux desktop, Ubuntu 22.04/24.04 amd64 first, ARM later |
 | Base branch | `develop` (legacy Qt GUI) unless the QML GUI is in scope, then `protected/linux-v4` |
 | Delivery | Feature flagged, off by default |
@@ -302,6 +302,7 @@ The plugin must implement every pure virtual of `KDC::Vfs`. POC-critical semanti
 | `src/server/vfs/linux/nodemap.h` | Path-to-node mapping and inode allocation for the FUSE tree |
 | `test/libcommonserver/vfs/testlinuxvfs.h` | CppUnit suite for placeholder metadata, pin state and the node map |
 | `test/libcommonserver/vfs/testlinuxvfs.cpp` | CppUnit wrappers that execute the shared checks; no real mount or root privileges required |
+| `test/libcommonserver/vfs/linux/CMakeLists.txt` | Dedicated Qt/Poco-free CMake entry point and CTest for the harness |
 | `test/libcommonserver/vfs/linux/testlinuxvfs_checks.h` | Pure C++20 checks shared by CppUnit and the standalone harness |
 | `test/libcommonserver/vfs/linux/testlinuxvfs_checks.cpp` | Executable assertions for metadata, xattrs, status/progress, pin state and NodeMap |
 | `test/libcommonserver/vfs/linux/testlinuxvfs_standalone.cpp` | Standalone `main` that runs every shared check and exits non-zero on failure |
@@ -618,11 +619,50 @@ the CppUnit suite. Last run output:
 All standalone Linux VFS checks passed
 ```
 
-A real CMake configure was attempted in this checkout. It failed before reaching the
-plugin or test targets because `src/3rdparty/utf8proc` is an uninitialized submodule
-(no `CMakeLists.txt`) and `find_package(Qt6)` cannot find Qt6. `libfuse3-dev` also has no
-apt candidate in this environment. The syntax-only compile of `fusesession.cpp` and
-`vfs_linux.cpp` passes against the local FUSE 3 headers.
+The isolated CMake harness was configured from a clean build directory and executed
+through CTest:
+
+```bash
+cmake -S test/libcommonserver/vfs/linux -B /tmp/kdrive-linux-vfs-cmake \
+    -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/kdrive-linux-vfs-cmake \
+    --target kDrive_test_linuxvfs_standalone --parallel
+ctest --test-dir /tmp/kdrive-linux-vfs-cmake --output-on-failure
+```
+
+The results were:
+
+```text
+-- Configuring done
+-- Generating done
+[100%] Built target kDrive_test_linuxvfs_standalone
+1/1 Test #1: linuxvfs_standalone ..............   Passed    0.00 sec
+100% tests passed out of 1
+```
+
+Running the built binary directly prints the nine `[PASS]` groups shown above and exits
+with code 0.
+
+Both submodules were initialized successfully with
+`git submodule update --init --recursive`. A root configure was then attempted with
+`-DBUILD_UNIT_TESTS=ON -DBUILD_LINUX_VFS=ON -DBUILD_GUI=OFF`; it now stops only at
+`find_package(Qt6)` because Qt6 is not installed. The exact package attempts were:
+
+```text
+$ sudo -n apt-get update
+sudo: The "no new privileges" flag is set, which prevents sudo from running as root.
+$ sudo -n apt-get install -y libfuse3-dev pkg-config qt6-base-dev \
+      libpoco-dev liblog4cplus-dev libcppunit-dev
+sudo: The "no new privileges" flag is set, which prevents sudo from running as root.
+$ apt-get download libfuse3-dev
+E: Unable to locate package libfuse3-dev
+$ apt-cache policy libfuse3-dev qt6-base-dev libpoco-dev \
+      liblog4cplus-dev libcppunit-dev
+# no candidate for any of these packages; pkg-config is installed
+```
+
+The syntax-only compile of `fusesession.cpp` and `vfs_linux.cpp` passes against the local
+FUSE 3 headers, but the plugin cannot be linked without libfuse3/Qt.
 
 The remaining validation is the full Qt/Conan build and the real mount/hydration scenario
 on an Ubuntu desktop with `/dev/fuse` and a kDrive account; neither can run here.

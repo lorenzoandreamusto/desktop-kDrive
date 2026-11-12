@@ -366,15 +366,45 @@ classification, stable inodes, rename, directory rename and erase/clear, ending
 with `All standalone Linux VFS checks passed`. Exit code was 0, including under
 AddressSanitizer and UBSan.
 
-Build-system and verification state: the plugin target lists all phase 3–6
-sources and links `PkgConfig::FUSE3` and `Threads::Threads`; `kDrive_test_common_server`
-compiles the real node-map and placeholder-metadata sources on Linux. A real
-CMake configure was attempted here but stopped before the plugin/test targets:
-`src/3rdparty/utf8proc` is an uninitialized submodule and `find_package(Qt6)`
-cannot find Qt6. `libfuse3-dev` also has no apt candidate in this environment,
-so the full plugin build and `kDrive_test_common_server` execution remain to be
-verified on the Ubuntu/Conan build environment. The FUSE session and plugin
-still need the full Ubuntu desktop validation described in the design document.
+The same isolated harness is available through a dedicated CMake entry point and
+CTest, without Qt, Poco, log4cplus or FUSE:
+
+```bash
+cmake -S test/libcommonserver/vfs/linux -B /tmp/kdrive-linux-vfs-cmake \
+    -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/kdrive-linux-vfs-cmake \
+    --target kDrive_test_linuxvfs_standalone --parallel
+ctest --test-dir /tmp/kdrive-linux-vfs-cmake --output-on-failure
+```
+
+This was run from a clean build directory; configure and build succeeded and CTest
+reported `100% tests passed out of 1`. The built binary printed the nine `[PASS]`
+groups and exited with code 0.
+
+Build-system state: both submodules were initialized successfully with
+`git submodule update --init --recursive`. A root configure with
+`-DBUILD_UNIT_TESTS=ON -DBUILD_LINUX_VFS=ON -DBUILD_GUI=OFF` now stops only at
+`find_package(Qt6)`: Qt6 is not installed. The apt attempts were blocked by the
+container restriction and missing package indices:
+
+```text
+$ sudo -n apt-get update
+sudo: The "no new privileges" flag is set, which prevents sudo from running as root.
+$ sudo -n apt-get install -y libfuse3-dev pkg-config qt6-base-dev \
+      libpoco-dev liblog4cplus-dev libcppunit-dev
+sudo: The "no new privileges" flag is set, which prevents sudo from running as root.
+$ apt-get download libfuse3-dev
+E: Unable to locate package libfuse3-dev
+$ apt-cache policy libfuse3-dev qt6-base-dev libpoco-dev \
+      liblog4cplus-dev libcppunit-dev
+# no candidate for any of these packages; pkg-config is installed
+```
+
+The plugin target still lists all phase 3–6 sources and links `PkgConfig::FUSE3`
+and `Threads::Threads`; `kDrive_test_common_server` compiles the real node-map and
+placeholder-metadata sources on Linux. The full plugin build, the CppUnit binary and
+the FUSE mount still need an Ubuntu/Conan environment with Qt6, libfuse3,
+`/dev/fuse` and a kDrive account.
 
 The release scripts (`build-release-appimage.sh` and `build-release-amd64.sh`) now enable
 `BUILD_LINUX_VFS=ON` and package the plugin, `libfuse3.so*`, `fusermount3` and
