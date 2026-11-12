@@ -4487,6 +4487,24 @@ ExitInfo AppServer::stopVfs(const SyncDbId syncDbId, const bool unregister) {
 }
 
 ExitInfo AppServer::setSupportsVirtualFiles(const SyncDbId syncDbId, const bool value, const bool asyncResponse) {
+    // Before disabling Lite Sync, hydrate every remaining placeholder while the mount is still active.
+    // The virtual files cleanup then keeps the hydrated content on disk and only removes the attributes.
+    if (!value) {
+        std::shared_ptr<Vfs> vfs;
+        {
+            const std::scoped_lock vfsLock(vfsMapMutex);
+            const auto vfsMapIt = vfsMap.find(syncDbId);
+            if (vfsMapIt != vfsMap.end()) {
+                vfs = vfsMapIt->second;
+            }
+        }
+
+        if (vfs && vfs->mode() == VirtualFileMode::Linux && !vfs->hydrateAllPlaceholders()) {
+            LOG_WARN(_logger, "Unable to hydrate all placeholders before disabling Lite Sync for syncDbId=" << syncDbId);
+            return {ExitCode::SystemError, ExitCause::FileAccessError};
+        }
+    }
+
     const std::scoped_lock lock(syncPalMapMutex);
     auto syncPalMapIt = syncPalMap.find(syncDbId);
     if (syncPalMapIt == syncPalMap.end()) {
