@@ -55,6 +55,7 @@ class TestNodeMap : public CppUnit::TestFixture, public TestBase {
         CPPUNIT_TEST_SUITE(TestNodeMap);
         CPPUNIT_TEST(testStableInodes);
         CPPUNIT_TEST(testRename);
+        CPPUNIT_TEST(testRenameDirectory);
         CPPUNIT_TEST(testEraseAndClear);
         CPPUNIT_TEST_SUITE_END();
 
@@ -65,6 +66,7 @@ class TestNodeMap : public CppUnit::TestFixture, public TestBase {
     protected:
         void testStableInodes();
         void testRename();
+        void testRenameDirectory();
         void testEraseAndClear();
 };
 

@@ -350,6 +350,13 @@ elseif(BUILD_CLIENT)
             install(FILES sync-folder-rules-linux.csv DESTINATION ${CMAKE_INSTALL_BINDIR} RENAME sync-folder-rules.csv)
         endif()
 
+        # Default Lite Sync app exclude list
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            file(COPY litesync-exclude-linux.lst DESTINATION ${BIN_OUTPUT_DIRECTORY})
+        else()
+            install(FILES litesync-exclude-linux.lst DESTINATION ${CMAKE_INSTALL_BINDIR})
+        endif()
+
         # Sentry
         find_library(SENTRY_SHARED_LIBRARY NAMES sentry NO_CACHE)
         message(STATUS "sentry dll found in ${SENTRY_SHARED_LIBRARY}")

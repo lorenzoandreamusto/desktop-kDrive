@@ -318,3 +318,27 @@ The architecture (`amd64` or `arm64`) used for building is the host architecture
 If you do not want to build through podman, use the `build-release-appimage.sh` script directly.
 
 The generated AppImage file will be located in the `build-linux-[arch]/install` directory.
+
+## Lite Sync on Linux (POC)
+
+Lite Sync on Linux is a proof of concept guarded by the CMake option
+`BUILD_LINUX_VFS`, which defaults to `OFF`. It requires FUSE 3:
+
+```bash
+sudo apt update && sudo apt install -y libfuse3-dev
+cmake -B build-linux-vfs -DCMAKE_BUILD_TYPE=Debug \
+    -DBUILD_UNIT_TESTS=ON -DBUILD_LINUX_VFS=ON
+cmake --build build-linux-vfs --parallel
+```
+
+The helper script `infomaniak-build-tools/linux/build-and-test-linux-vfs.sh`
+installs the system packages, configures the build and runs the Linux VFS unit
+tests. A real mount also needs `/dev/fuse` and `fusermount3`; containers and
+GitHub-hosted runners usually do not provide them, so mount integration remains
+a manual test on an Ubuntu desktop. The hydrate-on-open path is implemented with
+the existing direct-download jobs; the plugin blocks the FUSE open until the
+placeholder is hydrated or the timeout expires.
+
+The release pipeline keeps `BUILD_LINUX_VFS=OFF`. Packaging the plugin in the
+AppImage additionally requires bundling `libfuse3.so*` and a usable
+`fusermount3`; the setuid/AppImage constraints make that a separate POC step.

@@ -136,6 +136,32 @@ void TestNodeMap::testRename() {
     CPPUNIT_ASSERT_EQUAL(inode, nodeMap.inodeFor("/sync/renamed.txt"));
 }
 
+void TestNodeMap::testRenameDirectory() {
+    NodeMap nodeMap;
+    const uint64_t directoryInode = nodeMap.inodeFor("/sync/dir");
+    const uint64_t childInode = nodeMap.inodeFor("/sync/dir/file.txt");
+    const uint64_t otherInode = nodeMap.inodeFor("/sync/other.txt");
+
+    nodeMap.rename("/sync/dir", "/sync/moved");
+
+    const auto directoryPath = nodeMap.pathFor(directoryInode);
+    CPPUNIT_ASSERT(directoryPath.has_value());
+    CPPUNIT_ASSERT(directoryPath.value() == SyncPath("/sync/moved"));
+
+    const auto childPath = nodeMap.pathFor(childInode);
+    CPPUNIT_ASSERT(childPath.has_value());
+    CPPUNIT_ASSERT(childPath.value() == SyncPath("/sync/moved/file.txt"));
+    CPPUNIT_ASSERT_EQUAL(childInode, nodeMap.inodeFor("/sync/moved/file.txt"));
+
+    const auto otherPath = nodeMap.pathFor(otherInode);
+    CPPUNIT_ASSERT(otherPath.has_value());
+    CPPUNIT_ASSERT(otherPath.value() == SyncPath("/sync/other.txt"));
+
+    nodeMap.erase("/sync/moved");
+    CPPUNIT_ASSERT_EQUAL(static_cast<size_t>(1), nodeMap.size());
+    CPPUNIT_ASSERT(nodeMap.pathFor(otherInode).has_value());
+}
+
 void TestNodeMap::testEraseAndClear() {
     NodeMap nodeMap;
     nodeMap.inodeFor("/sync/file.txt");

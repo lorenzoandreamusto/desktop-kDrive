@@ -18,6 +18,8 @@
 
 #include "nodemap.h"
 
+#include <vector>
+
 namespace KDC {
 
 std::string NodeMap::normalize(const SyncPath &path) {
@@ -55,32 +57,50 @@ std::optional<SyncPath> NodeMap::pathFor(const uint64_t inode) const {
 
 void NodeMap::erase(const SyncPath &path) {
     const std::string key = normalize(path);
-    const std::lock_guard<std::mutex> lock(_mutex);
-
-    const auto it = _pathToInode.find(key);
-    if (it == _pathToInode.end()) {
+    if (key.empty() || key == ".") {
         return;
     }
 
-    _inodeToPath.erase(it->second);
-    _pathToInode.erase(it);
+    const std::lock_guard<std::mutex> lock(_mutex);
+
+    const std::string prefix = key + "/";
+    for (auto it = _pathToInode.begin(); it != _pathToInode.end();) {
+        if (it->first != key && it->first.rfind(prefix, 0) != 0) {
+            ++it;
+            continue;
+        }
+
+        _inodeToPath.erase(it->second);
+        it = _pathToInode.erase(it);
+    }
 }
 
 void NodeMap::rename(const SyncPath &from, const SyncPath &to) {
     const std::string fromKey = normalize(from);
     const std::string toKey = normalize(to);
-
-    const std::lock_guard<std::mutex> lock(_mutex);
-
-    const auto it = _pathToInode.find(fromKey);
-    if (it == _pathToInode.end()) {
+    if (fromKey.empty() || toKey.empty() || fromKey == toKey) {
         return;
     }
 
-    const uint64_t inode = it->second;
-    _pathToInode.erase(it);
-    _pathToInode[toKey] = inode;
-    _inodeToPath[inode] = toKey;
+    const std::lock_guard<std::mutex> lock(_mutex);
+
+    const std::string prefix = fromKey + "/";
+    std::vector<std::pair<std::string, uint64_t>> movedEntries;
+    for (auto it = _pathToInode.begin(); it != _pathToInode.end();) {
+        if (it->first != fromKey && it->first.rfind(prefix, 0) != 0) {
+            ++it;
+            continue;
+        }
+
+        const std::string movedKey = toKey + it->first.substr(fromKey.size());
+        movedEntries.emplace_back(movedKey, it->second);
+        _inodeToPath[it->second] = movedKey;
+        it = _pathToInode.erase(it);
+    }
+
+    for (const auto &[key, inode]: movedEntries) {
+        _pathToInode[key] = inode;
+    }
 }
 
 void NodeMap::clear() {
