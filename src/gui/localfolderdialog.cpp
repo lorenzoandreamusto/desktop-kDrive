@@ -201,11 +201,14 @@ void LocalFolderDialog::updateUI() {
             return;
         }
 
-        if (virtualFileMode == VirtualFileMode::Win || virtualFileMode == VirtualFileMode::Mac) {
+        if (virtualFileMode == VirtualFileMode::Win || virtualFileMode == VirtualFileMode::Mac ||
+            virtualFileMode == VirtualFileMode::Linux) {
             // Check file system
             _folderCompatibleWithLiteSync =
                     ((virtualFileMode == VirtualFileMode::Win && CommonUtility::isNTFS(QStr2Path(_localFolderPath))) ||
-                     (virtualFileMode == VirtualFileMode::Mac && CommonUtility::isAPFS(QStr2Path(_localFolderPath))));
+                     (virtualFileMode == VirtualFileMode::Mac && CommonUtility::isAPFS(QStr2Path(_localFolderPath))) ||
+                     (virtualFileMode == VirtualFileMode::Linux &&
+                      CommonUtility::isLiteSyncCompatible(QStr2Path(_localFolderPath))));
             if (!_folderCompatibleWithLiteSync) {
                 _warningLabel->setText(tr(R"(This folder is not compatible with Lite Sync.<br>
 Please select another folder. If you continue Lite Sync will be disabled.<br>
