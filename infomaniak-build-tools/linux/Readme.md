@@ -377,9 +377,10 @@ cmake --build /tmp/kdrive-linux-vfs-cmake \
 ctest --test-dir /tmp/kdrive-linux-vfs-cmake --output-on-failure
 ```
 
-This was run from a clean build directory; configure and build succeeded and CTest
-reported `100% tests passed out of 1`. The built binary printed the nine `[PASS]`
-groups and exited with code 0.
+The script above invokes this exact CMake target/CTest path; it does not contain a
+parallel direct-g++ build. This was run from a clean build directory; configure and
+build succeeded and CTest reported `100% tests passed out of 1`. The built binary
+printed the nine `[PASS]` groups and exited with code 0.
 
 Build-system state: both submodules were initialized successfully with
 `git submodule update --init --recursive`. A root configure with

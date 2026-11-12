@@ -309,7 +309,7 @@ The plugin must implement every pure virtual of `KDC::Vfs`. POC-critical semanti
 | `test/libcommonserver/vfs/linux/standalone_stubs/` | Minimal Qt/Poco-free type, IoHelper/xattr and log stubs for the standalone harness |
 | `litesync-exclude-linux.lst` | Placeholder exclusion list for Linux indexers (empty/comment-only in the POC) |
 | `infomaniak-build-tools/linux/build-and-test-linux-vfs.sh` | Installs the Linux dependencies, builds with `BUILD_LINUX_VFS=ON` and runs the unit tests |
-| `infomaniak-build-tools/linux/run-linux-vfs-standalone-tests.sh` | Compiles and runs the real metadata/NodeMap checks with g++, without Qt/Poco or a FUSE mount |
+| `infomaniak-build-tools/linux/run-linux-vfs-standalone-tests.sh` | Configures/builds the isolated CMake harness, runs CTest and the CMake-built binary; no direct g++ path |
 
 ### 5.2 Modified files
 
@@ -593,7 +593,9 @@ The build files now reference every new phase 3–6 source and test:
   bundle the FUSE library, helper and exclusion list.
 
 The real checks are executable without Qt/Poco through the shared helper and the
-standalone harness:
+standalone harness. The script is the single reproducible entry point; it invokes
+CMake configure, builds the target, runs `ctest --output-on-failure`, then runs the
+CMake-built binary so the assertions are visible:
 
 ```bash
 ./infomaniak-build-tools/linux/run-linux-vfs-standalone-tests.sh
@@ -619,8 +621,8 @@ the CppUnit suite. Last run output:
 All standalone Linux VFS checks passed
 ```
 
-The isolated CMake harness was configured from a clean build directory and executed
-through CTest:
+The same CMake harness can be driven manually, and the script above uses this exact
+configuration and target:
 
 ```bash
 cmake -S test/libcommonserver/vfs/linux -B /tmp/kdrive-linux-vfs-cmake \
